@@ -203,6 +203,8 @@ static uint8_t  s_set_speed;             /* 0瞬 1快 2普 3慢                 
 static uint8_t  s_set_auto;              /* 0 off 1快 2普 3慢               */
 static uint8_t  s_set_volume;            /* 0..8                           */
 static uint8_t  s_set_unlock;            /* debug: show all CG / flowchart */
+static uint8_t  s_need_full;             /* repaint bg+sprites this frame  */
+static uint8_t  s_prev_mode = 0xFFu;     /* detect mode switches           */
 static uint16_t s_auto_ticks;
 
 /* run state */
@@ -364,13 +366,36 @@ static uint32_t rgb565_x(uint16_t p)
 
 static void lfill_rect(int x, int y, int w, int h, uint32_t col)
 {
-    int xx, yy;
+    int xx, yy, y0 = y, y1 = y + h;
+    if (x < 0) { w += x; x = 0; }
+    if (x + w > SCR_W) w = SCR_W - x;
+    if (y0 < 0) y0 = 0;
+    if (y1 > SCR_H) y1 = SCR_H;
+    if (w <= 0 || y1 <= y0) return;
     col |= 0xFF000000u;
     for (xx = x; xx < x + w; xx++) {
-        if (xx < 0 || xx >= SCR_W) continue;
-        for (yy = y; yy < y + h; yy++) {
-            if (yy < 0 || yy >= SCR_H) continue;
-            lpx(xx, yy)[0] = col;
+        /* one multiply per column, then linear writes (phys y is contiguous) */
+        uint32_t *p = lpx(xx, y0);
+        for (yy = y0; yy < y1; yy++) *p++ = col;
+    }
+}
+
+static void ldim_rect(int x, int y, int w, int h, uint8_t keep)
+{
+    int xx, yy, y0 = y, y1 = y + h;
+    if (x < 0) { w += x; x = 0; }
+    if (x + w > SCR_W) w = SCR_W - x;
+    if (y0 < 0) y0 = 0;
+    if (y1 > SCR_H) y1 = SCR_H;
+    if (w <= 0 || y1 <= y0) return;
+    for (xx = x; xx < x + w; xx++) {
+        uint32_t *p = lpx(xx, y0);
+        for (yy = y0; yy < y1; yy++, p++) {
+            uint32_t c = p[0];
+            p[0] = 0xFF000000u |
+                (((((c >> 16) & 0xFFu) * keep) >> 8) << 16) |
+                (((((c >> 8) & 0xFFu) * keep) >> 8) << 8) |
+                ((((c & 0xFFu) * keep) >> 8));
         }
     }
 }
@@ -383,23 +408,7 @@ static void lrect_outline(int x, int y, int w, int h, int t, uint32_t col)
     lfill_rect(x + w - t, y, t, h, col);
 }
 
-static void ldim_rect(int x, int y, int w, int h, uint8_t keep)
-{
-    int xx, yy;
-    for (xx = x; xx < x + w; xx++) {
-        if (xx < 0 || xx >= SCR_W) continue;
-        for (yy = y; yy < y + h; yy++) {
-            uint32_t *p, c;
-            if (yy < 0 || yy >= SCR_H) continue;
-            p = lpx(xx, yy);
-            c = p[0];
-            p[0] = 0xFF000000u |
-                (((((c >> 16) & 0xFFu) * keep) >> 8) << 16) |
-                (((((c >> 8) & 0xFFu) * keep) >> 8) << 8) |
-                ((((c & 0xFFu) * keep) >> 8));
-        }
-    }
-}
+
 
 static void draw_glyph(int x, int y, uint32_t cp, uint32_t col)
 {
@@ -533,6 +542,7 @@ static void set_bg(const char *name)
     uint16_t w = 0, h = 0;
     s_bg_ok = 0;
     s_cur_bg[0] = 0;
+    s_need_full = 1;
     if (!name[0]) return;
     if (load_asset("bg", name, BG_W, BG_H, 0, s_bg, 0, &w, &h) &&
         w == BG_W && h == BG_H) {
@@ -544,6 +554,7 @@ static void set_bg(const char *name)
 
 static void set_spr(int slot, uint8_t pos, const char *name)
 {
+    s_need_full = 1;
     if (slot >= SPR_SLOTS) return;
     s_spr[slot].used = 0;
     s_spr[slot].name[0] = 0;
@@ -1083,6 +1094,7 @@ static void step(void)
         }
         case OP_SPRCLR: {
             uint8_t mask = rd_u8(), k;
+            s_need_full = 1;
             for (k = 0; k < SPR_SLOTS; k++)
                 if (mask & (1u << k)) s_spr[k].used = 0;
             break;
@@ -1200,9 +1212,30 @@ static void step(void)
 static void compose_bg_from(const uint16_t *src)
 {
     int x, y;
-    for (x = 0; x < SCR_W; x++)
-        for (y = 0; y < SCR_H; y++)
-            lpx(x, y)[0] = 0xFF000000u | rgb565_x(src[(long)y * BG_W + x]);
+    for (x = 0; x < SCR_W; x++) {
+        uint32_t *p = lpx(x, 0);
+        const uint16_t *s = src + x;
+        for (y = 0; y < SCR_H; y++, p++, s += BG_W)
+            *p = 0xFF000000u | rgb565_x(*s);
+    }
+}
+
+/* repaint just the textbox region of the background (used every frame so the
+   translucent box always blends over fresh pixels instead of darkening) */
+static void compose_bg_region(const uint16_t *src, int rx, int ry, int rw, int rh)
+{
+    int x, y, y1 = ry + rh;
+    if (ry < 0) ry = 0;
+    if (y1 > SCR_H) y1 = SCR_H;
+    if (rx < 0) { rw += rx; rx = 0; }
+    if (rx + rw > SCR_W) rw = SCR_W - rx;
+    if (rw <= 0 || y1 <= ry) return;
+    for (x = rx; x < rx + rw; x++) {
+        uint32_t *p = lpx(x, ry);
+        const uint16_t *s = src + (long)ry * BG_W + x;
+        for (y = ry; y < y1; y++, p++, s += BG_W)
+            *p = 0xFF000000u | rgb565_x(*s);
+    }
 }
 
 static void compose_bg(void)
@@ -1211,37 +1244,57 @@ static void compose_bg(void)
     else lfill_rect(0, 0, SCR_W, SCR_H, 0x101018u);
 }
 
-static void compose_sprites(void)
+static void compose_sprites_clip(int ry0, int ry1)
 {
     int s;
+    if (ry1 < 0) ry1 = SCR_H;
     for (s = SPR_SLOTS - 1; s >= 0; s--) {
-        int x, y, x0, y0;
+        int x, y, x0, y0, sy0, sy1;
         if (!s_spr[s].used) continue;
         y0 = SCR_H - s_spr[s].h;
         if (s_spr[s].pos == POS_LEFT)      x0 = 24;
         else if (s_spr[s].pos == POS_RIGHT) x0 = SCR_W - s_spr[s].w - 24;
         else                                x0 = (SCR_W - s_spr[s].w) >> 1;
+        sy0 = y0 < 0 ? -y0 : 0;
+        sy1 = s_spr[s].h;
+        if (y0 + sy1 > SCR_H) sy1 = SCR_H - y0;
+        /* clip to the requested logical y band */
+        if (y0 + sy0 < ry0) sy0 = ry0 - y0;
+        if (y0 + sy1 > ry1) sy1 = ry1 - y0;
+        if (sy1 <= sy0) continue;
         for (x = 0; x < s_spr[s].w; x++) {
             int xx = x0 + x;
+            const uint8_t *ap;
+            const uint16_t *cp;
+            uint32_t *p;
             if (xx < 0 || xx >= SCR_W) continue;
-            for (y = 0; y < s_spr[s].h; y++) {
-                int yy = y0 + y;
-                uint8_t a = s_spr[s].alpha[(long)y * s_spr[s].w + x];
-                uint32_t *p, col;
-                if (yy < 0 || yy >= SCR_H || a == 0) continue;
-                col = rgb565_x(s_spr[s].color[(long)y * s_spr[s].w + x]);
-                p = lpx(xx, yy);
-                if (a == 255) p[0] = 0xFF000000u | col;
-                else {
-                    uint32_t d = p[0];
+            ap = s_spr[s].alpha + (long)sy0 * s_spr[s].w + x;
+            cp = s_spr[s].color + (long)sy0 * s_spr[s].w + x;
+            p = lpx(xx, y0 + sy0);
+            for (y = sy0; y < sy1; y++, p++, ap += s_spr[s].w,
+                 cp += s_spr[s].w) {
+                uint8_t a = *ap;
+                uint32_t col;
+                if (a == 0) continue;
+                col = rgb565_x(*cp);
+                if (a == 255) { p[0] = 0xFF000000u | col; continue; }
+                {
+                    uint32_t d = p[0], na = 255u - a;
                     p[0] = 0xFF000000u |
-                        ((((col >> 16) & 0xFFu) * a + (((d >> 16) & 0xFFu) * (255u - a))) / 255u) << 16 |
-                        ((((col >> 8) & 0xFFu) * a + (((d >> 8) & 0xFFu) * (255u - a))) / 255u) << 8 |
-                        (((col & 0xFFu) * a + ((d & 0xFFu) * (255u - a))) / 255u);
+                        (((((col >> 16) & 0xFFu) * a +
+                           (((d >> 16) & 0xFFu) * na)) >> 8) << 16) |
+                        (((((col >> 8) & 0xFFu) * a +
+                           (((d >> 8) & 0xFFu) * na)) >> 8) << 8) |
+                        ((((col & 0xFFu) * a + ((d & 0xFFu) * na)) >> 8));
                 }
             }
         }
     }
+}
+
+static void compose_sprites(void)
+{
+    compose_sprites_clip(0, SCR_H);
 }
 
 static void compose_text(void)
@@ -1290,8 +1343,15 @@ static void draw_nameplate(const char *name)
 
 static void compose_textbox(void)
 {
-    /* gradient: strong at the bottom, fading toward the top (原版风) */
+    /* gradient: strong at the bottom, fading toward the top (原版风).
+       First rebuild the box region's base pixels (bg + sprites) so the
+       translucent gradient never compounds frame over frame. */
     int y;
+    if (s_bg_ok)
+        compose_bg_region(s_bg, BOX_X, BOX_Y, BOX_W, BOX_H);
+    else
+        lfill_rect(BOX_X, BOX_Y, BOX_W, BOX_H, 0x101018u);
+    compose_sprites_clip(BOX_Y, BOX_Y + BOX_H);
     for (y = 0; y < BOX_H; y++) {
         int a = 40 + (140 * (BOX_H - 1 - y)) / (BOX_H - 1);  /* 40..180 */
         ldim_rect(BOX_X, BOX_Y + y, BOX_W, 1, (uint8_t)a);
@@ -2145,6 +2205,11 @@ void hb_raw_frame(const hb_spoint_t *touch)
     uint8_t click, ffwd, back;
     int lx = 0, ly = 0;
 
+    if (s_prev_mode != s_mode) {          /* mode switch: full repaint */
+        s_prev_mode = s_mode;
+        s_need_full = 1;
+    }
+
     s_ticks++;
     if (touch) {                                   /* physical -> logical */
         lx = SCR_W - 1 - touch->y;                 /* CW grip: phys y grows left */
@@ -2292,8 +2357,15 @@ void hb_raw_frame(const hb_spoint_t *touch)
 
     if (s_mode == MODE_IGMENU) { compose_igmenu(); compose_toast(); compose_touchdbg(); return; }
 
-    compose_bg();
-    compose_sprites();
+    /* Background and sprites only change on OP_BG / OP_SPR / mode switches;
+       repainting them every frame is what made the UI feel frozen on the
+       ARM9. The textbox rebuilds its own region each frame (see
+       compose_textbox), so a stale overlay never lingers. */
+    if (s_need_full) {
+        compose_bg();
+        compose_sprites();
+        s_need_full = 0;
+    }
     if (s_mode == MODE_CHOICE) { compose_choice(); compose_toast(); compose_touchdbg(); return; }
     if (s_mode == MODE_END) {
         int w = ascii8_w("- THE END -", 2);
