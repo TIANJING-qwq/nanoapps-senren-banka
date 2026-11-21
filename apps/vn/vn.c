@@ -1106,9 +1106,11 @@ static void step(void)
             if (!name[0] || str_eq(name, s_last_bgm)) break;
             dl = xstrlen(name);
             if (14u + dl + 5u < sizeof path) {
-                static const uint16_t volmap[9] = {0, 0x1800, 0x3000, 0x4800,
-                                                   0x6000, 0x7800, 0x9000,
-                                                   0xB000, 0xC800};
+                /* API volume range is 0..0x7FFF — the old table went up to
+                   0xC800 (over range => silent on device). */
+                static const uint16_t volmap[9] = {0, 0x1000, 0x2000, 0x3000,
+                                                   0x4000, 0x5000, 0x6000,
+                                                   0x7000, 0x7FFF};
                 xmemcpy(path, DIR_BASE "/bgm/", 14);
                 xmemcpy(path + 14, name, dl + 1);
                 xmemcpy(path + 14 + dl, ".wav", 5);
