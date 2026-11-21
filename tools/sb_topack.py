@@ -99,6 +99,15 @@ if sprn_path.exists():
             spr_of[p[0]] = p[1]
     print(f"spr_names: {len(spr_of)} characters")
 
+# Execution graph (scenelist order + choices + per-label events)
+FLOW = {}
+flow_path = Path("NanoApps/build/sb_flow.json")
+if flow_path.exists():
+    import json as _json
+    FLOW = _json.load(open(flow_path, encoding="utf-8"))
+    print(f"flow: {len(FLOW)} chapters, "
+          f"{sum(len(v) for v in FLOW.values())} segments")
+
 # PRIMARY source: the full event stream (bg + sprite + dialogue, true order)
 ev_path = Path("NanoApps/build/sb_events.tsv")
 EVENTS = ev_path.exists()
@@ -206,6 +215,93 @@ if sm_path.exists():
             SCENEMAP[p[0]] = (int(p[1]), p[2], p[3])
 
 
+def build_from_flow(ci, base, segs, next_no):
+    """Compile a chapter's execution graph into a multi-label VNPK script.
+
+    Each meaningful segment becomes one label. A choice segment emits
+    OP_CHOICE with (label_id, option text) pairs; every other segment ends
+    with OP_JUMP to its merge/next segment (or OP_NEXT / OP_END at the end).
+    """
+    # label ids: index into the meaningful-segment list
+    seg_label = {}
+    order = [i for i, sg in enumerate(segs)
+             if sg["kind"] == "choice"
+             or any(e and e[0] == "S" for e in sg["events"])]
+    for lid, i in enumerate(order):
+        seg_label[i] = lid
+
+    def next_label_of(i):
+        j = segs[i]["next"]
+        return seg_label.get(j, -1) if j >= 0 else -1
+
+    bodies = []          # per label: op bytes
+    for lid, i in enumerate(order):
+        sg = segs[i]
+        b = bytearray()
+        cur_bg = ""
+        pending = ""
+        cur_spr = ""
+        if sg["kind"] == "choice":
+            opts = [(txt, seg_label.get(ti, -1))
+                    for txt, ti in sg.get("choice_idx", [])
+                    if seg_label.get(ti, -1) >= 0]
+            if not opts:
+                bodies.append(bytes([OP_END]))
+                continue
+            b += bytes([OP_CHOICE, len(opts)])
+            for txt, tl in opts:
+                tb = txt.encode("utf-8")[:200]
+                b += struct.pack("<I", tl) + s_str(tb)
+            bodies.append(bytes(b))
+            continue
+        for e in sg["events"]:
+            if e[0] == "B":
+                bb = bg_names.get(e[1])
+                if bb:
+                    pending = bb
+                continue
+            if e[0] == "C":
+                sp = spr_of.get(e[1]) or spr_of.get(e[1] + "a")
+                if sp and sp != cur_spr:
+                    if pending and pending != cur_bg:
+                        b += bytes([OP_BG]) + s_str(pending.encode())
+                        cur_bg = pending
+                    b += bytes([OP_SPR, 0, 0]) + s_str(sp.encode())
+                    cur_spr = sp
+                continue
+            if pending and pending != cur_bg:
+                b += bytes([OP_BG]) + s_str(pending.encode())
+                cur_bg = pending
+            spname, tx, voice = e[1], e[2], e[3] if len(e) > 3 else ""
+            t = tx.strip("「」")
+            if voice:
+                b += bytes([OP_VOICE]) + s_str(voice.encode("ascii"))
+            enc = t.encode("utf-8")[:60000]
+            b += bytes([OP_SAY]) + s_str(spname.encode("utf-8")) + s_str(enc)
+        nl = next_label_of(i)
+        if lid == len(order) - 1 and next_no is not None:
+            b += bytes([OP_NEXT]) + struct.pack("<H", next_no)
+        elif nl >= 0:
+            b += bytes([OP_JUMP]) + struct.pack("<I", nl)
+        b += bytes([OP_END])
+        bodies.append(bytes(b))
+
+    # assemble: header + label offset table + bodies
+    n = len(bodies)
+    hdr = 12 + 4 * n
+    offs = []
+    cur = hdr
+    for b in bodies:
+        offs.append(cur)
+        cur += len(b)
+    out = bytearray(b"VNPK" + struct.pack("<II", 1, n))
+    for o in offs:
+        out += struct.pack("<I", o)
+    for b in bodies:
+        out += b
+    return bytes(out)
+
+
 def build(ci, ks, lines, next_no):
     ops2 = bytearray()
     labels2 = []
@@ -295,7 +391,10 @@ for ci, ks in enumerate(order):
     g_next = route_group(order[ci + 1], ci + 1) if ci + 1 < len(order) else -1
     next_no = ci + 1 if ci + 1 < len(order) and g_cur == g_next else None
     src = events[ks] if EVENTS else chapters[ks]
-    blob = build(ci, ks, src, next_no)
+    if FLOW and ks in FLOW:
+        blob = build_from_flow(ci, ks, FLOW[ks], next_no)
+    else:
+        blob = build(ci, ks, src, next_no)
     safe = f"{ci:04d}"
     nsay = sum(1 for e in src if e[0] == "S") if EVENTS else len(src)
     if ci == 0:

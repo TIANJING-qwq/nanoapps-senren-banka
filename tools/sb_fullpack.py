@@ -23,39 +23,42 @@ def rd_str(b, pc):
 for f in [src / "script.bin"] + sorted((src / "ch").glob("*.bin")):
     b = f.read_bytes()
     nl = struct.unpack_from("<I", b, 8)[0]
-    pc = 12 + 4 * nl
-    while pc < len(b):
-        op = b[pc]; pc += 1
-        if op in (0, 4):
-            if op == 0:
-                break
-            pc += 1
-        elif op == 1:
-            pc += 4
-        elif op in (2, 5):
-            _, pc = rd_str(b, pc)
-        elif op == 3:
-            pc += 2
-            _, pc = rd_str(b, pc)
-        elif op == 6:
-            for _ in range(2):
-                s, pc = rd_str(b, pc)
-                chars |= set(s)
-        elif op == 7:
-            cnt = b[pc]; pc += 1
-            for _ in range(cnt):
+    starts = [struct.unpack_from("<I", b, 12 + 4 * i)[0] for i in range(nl)]
+    for start in starts:            # a chapter may hold many labels
+        pc = start
+        while pc < len(b):
+            op = b[pc]; pc += 1
+            if op in (0, 4):
+                if op == 0:
+                    break
+                pc += 1
+            elif op == 1:
                 pc += 4
+            elif op in (2, 5):
                 _, pc = rd_str(b, pc)
-        elif op == 8:
-            pc += 4
-        elif op == 9:
-            pc += 2
-        elif op == 10:
-            pc += 2
-        elif op == 11:
-            s, pc = rd_str(b, pc)
-        else:
-            print(f"op {op} at {pc - 1} in {f.name}"); sys.exit(1)
+            elif op == 3:
+                pc += 2
+                _, pc = rd_str(b, pc)
+            elif op == 6:
+                for _ in range(2):
+                    txt, pc = rd_str(b, pc)
+                    chars |= set(txt)
+            elif op == 7:
+                cnt = b[pc]; pc += 1
+                for _ in range(cnt):
+                    pc += 4
+                    txt, pc = rd_str(b, pc)
+                    chars |= set(txt)
+            elif op == 8:
+                pc += 4
+            elif op == 9:
+                pc += 2
+            elif op == 10:
+                pc += 2
+            elif op == 11:
+                _, pc = rd_str(b, pc)
+            else:
+                print(f"op {op} at {pc - 1} in {f.name}"); sys.exit(1)
 chars |= set((src / "chapters.tsv").read_text(encoding="utf-8"))
 chars = {c for c in chars if ord(c) >= 0x20} - {"\n", "\t"}
 print(f"{len(chars)} unique glyphs needed")
