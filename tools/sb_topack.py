@@ -63,6 +63,39 @@ for line in tsv.read_text(encoding="utf-8").splitlines():
         order.append(ks)
     chapters[ks].append(text)
 
+# speaker table from KrkrExtract .ks.ks.txt dump: base -> [(text, speaker)]
+spk_tbl = {}
+spk_path = Path("NanoApps/build/sb_speakers.tsv")
+if spk_path.exists():
+    for ln in spk_path.read_text(encoding="utf-8").splitlines():
+        base, sp, t = ln.split("\t", 2)
+        spk_tbl.setdefault(base, []).append((t, sp))
+print(f"speakers: {len(spk_tbl)} chapters, "
+      f"{sum(len(v) for v in spk_tbl.values())} lines")
+
+
+def chapter_base(ks):
+    return ks.split("ver")[0]
+
+
+def speaker_iter(ks):
+    """yield speaker for each dialogue text, aligned by exact text match
+    against the ks dump queue (dialogue may skip lines; never reorder)."""
+    q = spk_tbl.get(chapter_base(ks), [])
+    qi = 0
+    for text in chapters[ks]:
+        t = text.strip("「」『』")
+        while qi < len(q):
+            kt, ksp = q[qi]
+            qi += 1
+            if kt.strip("「」『』") == t:
+                yield ksp
+                break
+            # ks line not in dialogue list -> skip it
+        else:
+            yield ""
+
+
 NAMES = ("芳乃", "茉子", "蕾娜", "小春", "芦花", "将臣", "廉太郎", "ムラサメ",
          "丛雨", "朝武", "常陆", "神主", "心子", "レナ", "マキ", "雌蕊")
 
@@ -89,9 +122,10 @@ def build(ci, ks, lines, next_no):
     if sp:
         ops2 += bytes([OP_SPR, 0, 1]) + s_str(sp.encode())
     prev_spk = None
-    for text in lines:
+    for text, nm in zip(lines, speaker_iter(ks)):
         t = text.strip("「」")
-        nm = speaker_of(text)
+        if not nm:
+            nm = speaker_of(text)
         if nm and nm != prev_spk and nm in spr_map:
             ops2 += bytes([OP_SPR, 0, 1]) + s_str(spr_map[nm].encode())
             prev_spk = nm

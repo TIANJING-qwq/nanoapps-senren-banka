@@ -57,6 +57,9 @@ for f in SCN.glob("*.psb"):
             bg_names[s] += 1
 
 print(f"{len(bg_names)} distinct bg logical names; top 24:")
+Path("NanoApps/build/bg_names.txt").write_text(
+    "\n".join(f"{n}\t{c}" for n, c in bg_names.most_common()),
+    encoding="utf-8")
 for nm, c in bg_names.most_common(24):
     print(f"  {nm}  x{c}")
 
