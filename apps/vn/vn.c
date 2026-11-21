@@ -1140,14 +1140,16 @@ static void step(void)
                 static const uint16_t volmap[9] = {0, 0x1000, 0x2000, 0x3000,
                                                    0x4000, 0x5000, 0x6000,
                                                    0x7000, 0x7FFF};
-                xmemcpy(path, DIR_BASE "/bgm/", 14);
-                xmemcpy(path + 14, name, dl + 1);
-                xmemcpy(path + 14 + dl, ".WAV", 5);   /* FS is case-sensitive */
-                if (!hb_fs_size(path) && 14u + dl + 5u < sizeof path) {
-                    /* our bgm files shipped lowercase: try .wav too */
-                    xmemcpy(path + 14 + dl, ".wav", 5);
+                /* "/Data/vn/bgm/" is 13 chars — copying 14 used to append
+                   the literal's NUL and truncate the path before the file
+                   name, so EVERY bgm lookup missed. */
+                xmemcpy(path, DIR_BASE "/bgm/", 13);
+                xmemcpy(path + 13, name, dl + 1);
+                xmemcpy(path + 13 + dl, ".WAV", 5);
+                if (!hb_fs_size(path)) {      /* files may be .wav lowercase */
+                    xmemcpy(path + 13 + dl, ".wav", 5);
                     if (!hb_fs_size(path))
-                        xmemcpy(path + 14 + dl, ".WAV", 5);
+                        xmemcpy(path + 13 + dl, ".WAV", 5);
                 }
                 if (hb_fs_size(path)) s_bgm_play++;
                 else if (s_bgm_miss < 9999) s_bgm_miss++;
@@ -1191,14 +1193,16 @@ static void step(void)
             if (14u + dl + 5u < sizeof path) {
                 uint8_t wh[44];
                 uint32_t got, rate, dsize;
-                xmemcpy(path, DIR_BASE "/voice/", 14);
-                xmemcpy(path + 14, name, dl + 1);
-                xmemcpy(path + 14 + dl, ".WAV", 5);   /* FS is case-sensitive */
+                /* "/Data/vn/voice/" is 15 chars — the old 14 dropped the
+                   trailing slash and glued the file name onto "voice". */
+                xmemcpy(path, DIR_BASE "/voice/", 15);
+                xmemcpy(path + 15, name, dl + 1);
+                xmemcpy(path + 15 + dl, ".WAV", 5);   /* FS is case-sensitive */
                 got = hb_fs_read(path, wh, 44);
                 if (got != 44) {          /* case-insensitive fallback */
-                    xmemcpy(path + 14 + dl, ".wav", 5);
+                    xmemcpy(path + 15 + dl, ".wav", 5);
                     got = hb_fs_read(path, wh, 44);
-                    xmemcpy(path + 14 + dl, ".WAV", 5);
+                    xmemcpy(path + 15 + dl, ".WAV", 5);
                 }
                 rate = got == 44 ? (uint32_t)wh[24] | ((uint32_t)wh[25] << 8)
                     | ((uint32_t)wh[26] << 16) | ((uint32_t)wh[27] << 24) : 0;
@@ -2243,9 +2247,9 @@ void hb_raw_frame(const hb_spoint_t *touch)
         char bp[96];
         uint32_t dl = xstrlen(s_last_bgm);
         if (dl && 14u + dl + 5u < sizeof bp) {
-            xmemcpy(bp, DIR_BASE "/bgm/", 14);
-            xmemcpy(bp + 14, s_last_bgm, dl + 1);
-            xmemcpy(bp + 14 + dl, ".WAV", 5);
+            xmemcpy(bp, DIR_BASE "/bgm/", 13);
+            xmemcpy(bp + 13, s_last_bgm, dl + 1);
+            xmemcpy(bp + 13 + dl, ".WAV", 5);
             queue_sound(bp, s_bgm_vol, 1);
             s_bgm_t0 = s_ticks;
             hb_audio_play_wav_main(s_pending_snd, s_pending_vol);
