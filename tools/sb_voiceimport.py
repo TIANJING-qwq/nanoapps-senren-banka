@@ -15,12 +15,14 @@ from pathlib import Path
 
 from pyogg import VorbisFile
 
-RATE = 22050
+RATE = int(sys.argv[3]) if len(sys.argv) > 3 and sys.argv[3].isdigit() \
+    else 16000
 
 src = Path(sys.argv[1])
 out = (Path(sys.argv[2]).resolve() / "voice")
-filters = sys.argv[3:]
+filters = [a for a in sys.argv[3:] if not a.isdigit()]
 out.mkdir(parents=True, exist_ok=True)
+print(f"target rate: {RATE} Hz mono")
 
 
 def wanted(name: str) -> bool:

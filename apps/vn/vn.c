@@ -1101,7 +1101,8 @@ static void step(void)
                 dsize = got == 44 ? (uint32_t)wh[40] | ((uint32_t)wh[41] << 8)
                     | ((uint32_t)wh[42] << 16) | ((uint32_t)wh[43] << 24) : 0;
                 if (rate) {
-                    uint32_t ms = dsize / (rate / 1000u + 1u);
+                    /* 16-bit mono PCM: ms = bytes / (rate*2/1000) */
+                    uint32_t ms = dsize / (rate / 500u ? rate / 500u : 1u);
                     if (ms > 60000u) ms = 60000u;
                     s_voice_ticks = ms / VOICE_TICK_MS + 1u;
                 }
