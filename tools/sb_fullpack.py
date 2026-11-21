@@ -74,12 +74,19 @@ for f in (src / "ch").glob("*.bin"):
     (out / "ch" / f.name).write_bytes(f.read_bytes())
 print(f"scripts: 1 + {len(list((src / 'ch').glob('*.bin')))} chapters")
 
-# 3) assets from the verified demo pack (bg/cg/cgt/spr/ui/bgm)
+# 3) keep the REAL assets already imported into the pack (bg/cg/cgt/spr from
+#    tools/sb_bgimport2.py / sb_cgimport2.py / sb_sprimport2.py); only fill
+#    gaps from the verified demo pack. Never overwrite real art with demo art.
 demo = Path("NanoApps/build/galpack-demo")
+filled = 0
 for sub in ("bg", "cg", "cgt", "spr", "ui", "bgm"):
     d = demo / sub
-    if d.exists():
-        (out / sub).mkdir(exist_ok=True)
-        for f in d.iterdir():
-            (out / sub / f.name).write_bytes(f.read_bytes())
-print("assets copied from demo pack")
+    if not d.exists():
+        continue
+    (out / sub).mkdir(exist_ok=True)
+    for f in d.iterdir():
+        tgt = out / sub / f.name
+        if not tgt.exists():
+            tgt.write_bytes(f.read_bytes())
+            filled += 1
+print(f"assets: real kept, {filled} placeholders filled from demo")

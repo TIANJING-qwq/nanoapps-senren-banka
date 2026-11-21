@@ -87,6 +87,18 @@ if bgn_path.exists():
             bg_names[p[0]] = p[1]
     print(f"bg_names: {len(bg_names)} real background names")
 
+# character name -> sprite asset (from tools/sb_sprimport2.py)
+spr_of = {}
+sprn_path = Path("NanoApps/build/sb_full/spr_names.tsv")
+if not sprn_path.exists():
+    sprn_path = Path("NanoApps/build/spr_names.tsv")
+if sprn_path.exists():
+    for ln in sprn_path.read_text(encoding="utf-8").splitlines():
+        p = ln.split("\t")
+        if len(p) == 2:
+            spr_of[p[0]] = p[1]
+    print(f"spr_names: {len(spr_of)} characters")
+
 # PRIMARY source: the full event stream (bg + sprite + dialogue, true order)
 ev_path = Path("NanoApps/build/sb_events.tsv")
 EVENTS = ev_path.exists()
@@ -210,14 +222,25 @@ def build(ci, ks, lines, next_no):
             ops2 += bytes([OP_BGM]) + s_str(bgm.encode())
         cur_bg = ""
         pending = ""
+        cur_spr = ""
         for e in lines:
             if e[0] == "B":
                 bb = bg_names.get(e[1])
                 if bb:
+                    if pending and pending != bb:
+                        cur_spr = ""      # new scene: drop the old sprite
                     pending = bb
                 continue
             if e[0] == "C":
-                continue          # sprites await real fgimage assets
+                # character sprite change: speakername -> spr asset
+                sp = spr_of.get(e[1]) or spr_of.get(e[1] + "a")
+                if sp and sp != cur_spr:
+                    if pending and pending != cur_bg:
+                        ops2 += bytes([OP_BG]) + s_str(pending.encode())
+                        cur_bg = pending
+                    ops2 += bytes([OP_SPR, 0, 0]) + s_str(sp.encode())
+                    cur_spr = sp
+                continue
             if pending and pending != cur_bg:
                 ops2 += bytes([OP_BG]) + s_str(pending.encode())
                 cur_bg = pending
