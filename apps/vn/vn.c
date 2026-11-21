@@ -62,7 +62,12 @@
 #define FONT_GLYPH_MAX  3400
 #define FONT_W_MAX      24
 #define FONT_H_MAX      24
-#define FONT_FILE_MAX   (10u + (FONT_GLYPH_MAX) * (4u + (FONT_H_MAX) * 3u))
+#define FONT_FILE_MAX   (10u + (FONT_GLYPH_MAX) * \
+                         (4u + (FONT_H_MAX) * (((FONT_W_MAX) + 7u) / 8u)))
+/* asset scratch: largest asset is a 432x240 RGB565 bg/cg (9-byte header +
+ * 2 bytes/pixel). MUST be separate from s_font_file: images loaded every
+ * frame used to overwrite the glyph bitmaps (the "all CJK garbled" bug). */
+#define ASSET_MAX       (9u + 432u * 240u * 2u)
 #define BG_W            SCR_W
 #define BG_H            SCR_H
 #define SPR_SLOTS       2
@@ -123,13 +128,16 @@ enum {
 /* ---------------------------------------------------------------- state ---- */
 
 /* font.bin: "VNFN" u8 w u8 h u8 bpp u8 rsvd u16 n, sorted entries */
-static uint8_t  s_font_file[FONT_FILE_MAX];   /* also asset load scratch   */
+static uint8_t  s_font_file[FONT_FILE_MAX];   /* font.bin ONLY              */
+static uint8_t  s_asset_buf[ASSET_MAX];       /* image load scratch         */
 static uint8_t  s_font_w, s_font_h;
 static uint16_t s_font_n;
 static uint32_t s_font_cp[FONT_GLYPH_MAX];
 static uint32_t s_font_off[FONT_GLYPH_MAX];
 static uint32_t s_font_got;                    /* bytes read (self-test)  */
 static uint32_t s_font_xor;                    /* sample checksum         */
+static uint16_t s_voice_play, s_voice_miss;    /* audio self-test counters */
+static uint16_t s_bgm_play, s_bgm_miss;
 
 /* script.bin: "VNPK" u32 ver u32 nlabels, u32 table[], opcode stream */
 static uint8_t  s_script[SCRIPT_MAX];
@@ -502,16 +510,16 @@ static uint8_t load_asset(const char *dir, const char *name, uint16_t want_w,
 
     px = (uint32_t)w * h;
     need = 9u + px * 2u + (fmt == 1u ? px : 0u);
-    if (need > FONT_FILE_MAX) { rd_err(0xE5u); return 0; }
+    if (need > ASSET_MAX) { rd_err(0xE5u); return 0; }
 
-    got = hb_fs_read_chunked(path, s_font_file, need);
+    got = hb_fs_read_chunked(path, s_asset_buf, need);
     if (got != need) return 0;
     if (color_out)
         for (i = 0; i < px; i++)
-            color_out[i] = (uint16_t)((uint16_t)s_font_file[9u + i * 2u] |
-                                      ((uint16_t)s_font_file[9u + i * 2u + 1u] << 8));
+            color_out[i] = (uint16_t)((uint16_t)s_asset_buf[9u + i * 2u] |
+                                      ((uint16_t)s_asset_buf[9u + i * 2u + 1u] << 8));
     if (alpha_out && fmt == 1u)
-        xmemcpy(alpha_out, s_font_file + 9u + px * 2u, px);
+        xmemcpy(alpha_out, s_asset_buf + 9u + px * 2u, px);
     if (out_w) *out_w = w;
     if (out_h) *out_h = h;
     return 1;
@@ -1086,7 +1094,10 @@ static void step(void)
                 xmemcpy(path, DIR_BASE "/bgm/", 14);
                 xmemcpy(path + 14, name, dl + 1);
                 xmemcpy(path + 14 + dl, ".wav", 5);
-                hb_audio_play_wav_main(path, volmap[s_set_volume]);
+                if (hb_audio_play_wav_main(path, volmap[s_set_volume]))
+                    s_bgm_play++;
+                else if (s_bgm_miss < 9999)
+                    s_bgm_miss++;
                 xmemcpy(s_last_bgm, name, dl + 1);
             }
             break;
@@ -1116,6 +1127,8 @@ static void step(void)
                     | ((uint32_t)wh[26] << 16) | ((uint32_t)wh[27] << 24) : 0;
                 dsize = got == 44 ? (uint32_t)wh[40] | ((uint32_t)wh[41] << 8)
                     | ((uint32_t)wh[42] << 16) | ((uint32_t)wh[43] << 24) : 0;
+                if (got == 44) s_voice_play++;
+                else if (s_voice_miss < 9999) s_voice_miss++;
                 if (rate) {
                     /* 16-bit mono PCM: ms = bytes / (rate*2/1000) */
                     uint32_t ms = dsize / (rate / 500u ? rate / 500u : 1u);
@@ -1407,6 +1420,30 @@ static void compose_title(void)
             b[i++] = hex[(v >> k) & 0xFu];
         b[i] = 0;
         draw_ascii8(6, 2, b, 1, 0x6FCF97u);
+        /* audio self-test: voice/bgm plays vs misses so far */
+        i = 0;
+        b[i++] = 'V'; b[i++] = ':';
+        v = s_voice_play;
+        b[i++] = (char)('0' + (v / 100) % 10);
+        b[i++] = (char)('0' + (v / 10) % 10);
+        b[i++] = (char)('0' + v % 10);
+        b[i++] = '/';
+        v = s_voice_miss;
+        b[i++] = (char)('0' + (v / 100) % 10);
+        b[i++] = (char)('0' + (v / 10) % 10);
+        b[i++] = (char)('0' + v % 10);
+        b[i++] = ' '; b[i++] = 'B'; b[i++] = ':';
+        v = s_bgm_play;
+        b[i++] = (char)('0' + (v / 100) % 10);
+        b[i++] = (char)('0' + (v / 10) % 10);
+        b[i++] = (char)('0' + v % 10);
+        b[i++] = '/';
+        v = s_bgm_miss;
+        b[i++] = (char)('0' + (v / 100) % 10);
+        b[i++] = (char)('0' + (v / 10) % 10);
+        b[i++] = (char)('0' + v % 10);
+        b[i] = 0;
+        draw_ascii8(6, SCR_H - 10, b, 1, 0x6FCF97u);
         if (s_font_w)
             draw_str("\xE5\x8D\x83\xE6\x81\x8B\xE4\xB8\x87\xE8\x8A\xB1", /* 千恋万花 */
                      6, 12, 0xFFD166u);
