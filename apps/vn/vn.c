@@ -1142,50 +1142,19 @@ static void step(void)
             break;
         }
         case OP_BGM: {
-            char name[SAVENAME_MAX], path[96];
-            uint32_t dl;
+            /* Background music playback is DISABLED per request: the iPod
+             * audio stack has a single static descriptor and bgm + voice
+             * compete for it (overlap => device reboot). We still record the
+             * track name so saves/scene state stay faithful, but nothing is
+             * played for bgm. */
+            char name[SAVENAME_MAX];
             rd_str(name, (uint16_t)sizeof name);
-            if (!name[0] || str_eq(name, s_last_bgm)) break;
-            dl = xstrlen(name);
-            if (14u + dl + 5u < sizeof path) {
-                /* API volume range is 0..0x7FFF — the old table went up to
-                   0xC800 (over range => silent on device). */
-                static const uint16_t volmap[9] = {0, 0x1000, 0x2000, 0x3000,
-                                                   0x4000, 0x5000, 0x6000,
-                                                   0x7000, 0x7FFF};
-                /* "/Data/vn/bgm/" is 13 chars — copying 14 used to append
-                   the literal's NUL and truncate the path before the file
-                   name, so EVERY bgm lookup missed. */
-                xmemcpy(path, DIR_BASE "/bgm/", 13);
-                xmemcpy(path + 13, name, dl + 1);
-                xmemcpy(path + 13 + dl, ".WAV", 5);
-                if (!hb_fs_size(path)) {      /* files may be .wav lowercase */
-                    xmemcpy(path + 13 + dl, ".wav", 5);
-                    if (!hb_fs_size(path))
-                        xmemcpy(path + 13 + dl, ".WAV", 5);
-                }
-                if (hb_fs_size(path)) s_bgm_play++;
-                else if (s_bgm_miss < 9999) s_bgm_miss++;
-                s_bgm_vol = volmap[s_set_volume];
-                /* length first (used as the audio-mutex hold time) */
-                {
-                    uint8_t wh[44];
-                    uint32_t rate, dsize, ms = 0;
-                    if (hb_fs_read(path, wh, 44) == 44) {
-                        rate = (uint32_t)wh[24] | ((uint32_t)wh[25] << 8) |
-                               ((uint32_t)wh[26] << 16) | ((uint32_t)wh[27] << 24);
-                        dsize = (uint32_t)wh[40] | ((uint32_t)wh[41] << 8) |
-                                ((uint32_t)wh[42] << 16) | ((uint32_t)wh[43] << 24);
-                        if (rate) ms = dsize / (rate / 500u ? rate / 500u : 1u);
-                    }
-                    s_bgm_ticks = ms ? ms / VOICE_TICK_MS : 0u;
-                    s_bgm_t0 = s_ticks;
-                }
-                /* queue it: the API has ONE static descriptor, so a bgm call
-                   next to the voice call would clobber it. Frame-start flush
-                   plays it, gated by the mutex. */
-                queue_sound(path, s_bgm_vol, 1, (uint16_t)s_bgm_ticks);
-                xmemcpy(s_last_bgm, name, dl + 1);            }
+            if (name[0]) {
+                uint32_t dl = xstrlen(name) + 1u;
+                if (dl > sizeof s_last_bgm) dl = sizeof s_last_bgm;
+                xmemcpy(s_last_bgm, name, dl - 1u);
+                s_last_bgm[dl - 1u] = 0;
+            }
             break;
         }
         case OP_VOICE: {
@@ -2267,24 +2236,6 @@ void hb_raw_frame(const hb_spoint_t *touch)
            draw) around playback or the device reboots. Keep it tiny and in
            the corner so it is visually harmless, but genuinely scale-3. */
         draw_ascii8(SCR_W - 26, SCR_H - 9, "..", 3, 0x000000u);
-    }
-    /* BGM loop: the API is single-shot, so restart when the track ends
-       (only while in-scene and a track is loaded). */
-    if (0 && s_bgm_ticks && !audio_busy() && s_mode == MODE_SCENE &&
-        s_ticks - s_bgm_t0 >= s_bgm_ticks) {
-        char bp[96];
-        uint32_t dl = xstrlen(s_last_bgm);
-        if (dl && 13u + dl + 5u < sizeof bp) {
-            xmemcpy(bp, DIR_BASE "/bgm/", 13);
-            xmemcpy(bp + 13, s_last_bgm, dl + 1);
-            xmemcpy(bp + 13 + dl, ".WAV", 5);
-            if (hb_audio_play_wav_main(bp, s_bgm_vol)) {
-                uint32_t hold = s_bgm_ticks;
-                s_audio_until = s_ticks + hold + hold / 2u + 60u;
-                s_bgm_t0 = s_ticks;
-                hb_display_wait_vsync();
-            }
-        }
     }
 
     if (s_prev_mode != s_mode) {          /* mode switch: full repaint */
