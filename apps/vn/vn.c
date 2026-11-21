@@ -215,6 +215,9 @@ static uint8_t  s_prev_mode = 0xFFu;     /* detect mode switches           */
 static char     s_pending_snd[96];
 static uint16_t s_pending_vol;
 static uint8_t  s_pending_kind;          /* 0 none, 1 bgm, 2 voice        */
+static char     s_dbg_snd[40];           /* last attempted sound (tail)   */
+static uint8_t  s_dbg_ret;               /* its play() return value       */
+static uint16_t s_dbg_calls;             /* how many play calls happened  */
 
 static void queue_sound(const char *path, uint16_t vol, uint8_t kind)
 {
@@ -1549,12 +1552,53 @@ static void compose_title(void)
         b[i++] = (char)('0' + v % 10);
         b[i] = 0;
         draw_ascii8(6, SCR_H - 10, b, 1, 0x6FCF97u);
+        /* audio debug: last attempted file + return + call count */
+        {
+            char d[44];
+            int k = 0, j = 0;
+            const char *p1 = "SND:";
+            while (*p1) d[k++] = *p1++;
+            d[k++] = (char)('0' + (s_dbg_ret ? 1 : 0));
+            d[k++] = ' ';
+            while (s_dbg_snd[j] && k < 40) d[k++] = s_dbg_snd[j++];
+            d[k] = 0;
+            draw_ascii8(6, SCR_H - 20, d, 1, 0xFFD166u);
+        }
         if (s_font_w)
             draw_str("\xE5\x8D\x83\xE6\x81\x8B\xE4\xB8\x87\xE8\x8A\xB1", /* 千恋万花 */
                      6, 12, 0xFFD166u);
     }
-    /* ---- AUDIO SELF-TEST removed: all three formats (44.1k, 16k, OS
-     * resource) were confirmed audible on device. ---- */
+    /* ---- AUDIO DIAG: on the title screen, play a REAL voice file
+     * (/Data/vn/voice/CY001001.WAV = the game's first line) 4 s after open,
+     * then report the return value + call count. This isolates "the file
+     * plays from the game's own path" from "the in-scene path never runs". */
+    {
+        static uint32_t t0;
+        static uint8_t done;
+        char db[44];
+        int k = 0, j = 0;
+        uint32_t el;
+        const char *p1 = "SND:";
+        if (!t0) t0 = s_ticks;
+        el = (s_ticks - t0) / 30u;
+        if (!done && el >= 4u) {
+            s_dbg_ret = (uint8_t)hb_audio_play_wav_main(
+                DIR_BASE "/voice/CY001001.WAV", 0x7FFFu);
+            s_dbg_calls++;
+            done = 1;
+            hb_display_wait_vsync();
+        }
+        while (*p1) db[k++] = *p1++;
+        db[k++] = (char)('0' + (s_dbg_ret ? 1 : 0));
+        db[k++] = ' ';
+        db[k++] = (char)('0' + (s_dbg_calls / 100) % 10);
+        db[k++] = (char)('0' + (s_dbg_calls / 10) % 10);
+        db[k++] = (char)('0' + s_dbg_calls % 10);
+        db[k++] = ' ';
+        while (s_dbg_snd[j] && k < 40) db[k++] = s_dbg_snd[j++];
+        db[k] = 0;
+        draw_ascii8(6, 30, db, 1, 0xFFD166u);
+    }
 }
 
 static void title_hit(int lx, int ly)
@@ -2250,7 +2294,17 @@ void hb_raw_frame(const hb_spoint_t *touch)
      * audio pthread gets CPU. Must be BEFORE the redraw work, and reached on
      * every path (previous version only yielded on the dialogue path). */
     if (s_pending_kind) {
-        hb_audio_play_wav_main(s_pending_snd, s_pending_vol);
+        uint32_t i = 0, n = xstrlen(s_pending_snd);
+        s_dbg_ret = (uint8_t)hb_audio_play_wav_main(s_pending_snd, s_pending_vol);
+        if (s_dbg_calls < 9999) s_dbg_calls++;
+        /* keep the tail of the path (file name is what matters) */
+        if (n > 20u) i = n - 20u;
+        {
+            uint32_t k = 0;
+            while (s_pending_snd[i] && k < sizeof s_dbg_snd - 1u)
+                s_dbg_snd[k++] = s_pending_snd[i++];
+            s_dbg_snd[k] = 0;
+        }
         s_pending_kind = 0;
         s_pending_snd[0] = 0;
         hb_display_wait_vsync();
