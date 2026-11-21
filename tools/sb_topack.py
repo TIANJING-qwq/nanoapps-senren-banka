@@ -64,7 +64,8 @@ def bg_file_for(ci):
                 continue
             return pick
     return "bg_school"
-chapters = {}          # base -> [(text, speaker, voice)]
+chapters = {}          # base -> [(text, speaker, voice)]   (fallback path)
+events = {}            # base -> [("B",name) | ("C",char,file) | ("S",sp,tx,voice)]
 order = []
 bgm_of = {}
 bgm_path = Path("NanoApps/build/sb_bgms.tsv")
@@ -73,31 +74,67 @@ if bgm_path.exists():
         if "\t" in ln:
             b, g = ln.split("\t", 1)
             bgm_of[b] = g
+
+# real background name -> bbNN (from tools/sb_bgimport2.py)
+bg_names = {}
+bgn_path = Path("NanoApps/build/sb_full/bg_names.tsv")
+if not bgn_path.exists():
+    bgn_path = Path("NanoApps/build/bg_names.tsv")
+if bgn_path.exists():
+    for ln in bgn_path.read_text(encoding="utf-8").splitlines():
+        p = ln.split("\t")
+        if len(p) == 2:
+            bg_names[p[0]] = p[1]
+    print(f"bg_names: {len(bg_names)} real background names")
+
+# PRIMARY source: the full event stream (bg + sprite + dialogue, true order)
+ev_path = Path("NanoApps/build/sb_events.tsv")
+EVENTS = ev_path.exists()
+if EVENTS:
+    for ln in ev_path.read_text(encoding="utf-8").splitlines():
+        p = ln.split("\t")
+        if len(p) < 3:
+            continue
+        base = re.sub(r"\.ks(\.psb)?(\.tjs)?$", "", p[0])
+        if base not in events:
+            events[base] = []
+            order.append(base)
+        if p[1] == "B":
+            events[base].append(("B", p[2]))
+        elif p[1] == "C":
+            events[base].append(("C", p[2], p[3] if len(p) > 3 else ""))
+        elif p[1] == "S":
+            events[base].append(("S", p[2], p[3] if len(p) > 3 else "",
+                                 p[4] if len(p) > 4 else ""))
+    print(f"source: sb_events.tsv ({len(events)} chapters, "
+          f"{sum(len(v) for v in events.values())} events)")
+
 tjs_path = Path("NanoApps/build/sb_tjs83.tsv")   # 8.3 short voice names
 if not tjs_path.exists():
     tjs_path = Path("NanoApps/build/sb_tjs.tsv")
-if tjs_path.exists():
-    for ln in tjs_path.read_text(encoding="utf-8").splitlines():
-        parts = ln.split("\t")
-        if len(parts) < 3:
-            continue
-        base, sp, tx = parts[0], parts[1], parts[2]
-        v = parts[3] if len(parts) > 3 and parts[3] else ""
-        base = re.sub(r"\.ks(\.psb)?(\.tjs)?$", "", base)
-        if base not in chapters:
-            chapters[base] = []
-            order.append(base)
-        chapters[base].append((tx, sp, v))
-    print(f"source: sb_tjs.tsv ({sum(len(v) for v in chapters.values())}"
-          " lines with speakers+voice)")
-else:
-    for line in tsv.read_text(encoding="utf-8").splitlines():
-        ks, off, text = line.split("\t", 2)
-        ks = ks.rsplit("ver", 1)[0].rstrip("・").rstrip(".ks")
-        if ks not in chapters:
-            chapters[ks] = []
-            order.append(ks)
-        chapters[ks].append((text, "", ""))
+if not EVENTS:
+    if tjs_path.exists():
+        for ln in tjs_path.read_text(encoding="utf-8").splitlines():
+            parts = ln.split("\t")
+            if len(parts) < 3:
+                continue
+            base, sp, tx = parts[0], parts[1], parts[2]
+            v = parts[3] if len(parts) > 3 and parts[3] else ""
+            base = re.sub(r"\.ks(\.psb)?(\.tjs)?$", "", base)
+            if base not in chapters:
+                chapters[base] = []
+                order.append(base)
+            chapters[base].append((tx, sp, v))
+        print(f"source: sb_tjs.tsv ({sum(len(v) for v in chapters.values())}"
+              " lines with speakers+voice)")
+    else:
+        for line in tsv.read_text(encoding="utf-8").splitlines():
+            ks, off, text = line.split("\t", 2)
+            ks = ks.rsplit("ver", 1)[0].rstrip("・").rstrip(".ks")
+            if ks not in chapters:
+                chapters[ks] = []
+                order.append(ks)
+            chapters[ks].append((text, "", ""))
 
 
 NAMES = ("芳乃", "茉子", "蕾娜", "小春", "芦花", "将臣", "廉太郎", "ムラサメ",
@@ -163,27 +200,57 @@ def build(ci, ks, lines, next_no):
     hdr_len = 12 + 4  # 1 label
     labels2.append(hdr_len)
     ops2 += bytes([OP_LABEL]) + struct.pack("<I", 0)
-    ops2 += bytes([OP_BG]) + s_str(bg_file_for(ci).encode())
-    bgm = bgm_of.get(ks.split("ver")[0])
-    if bgm:
-        ops2 += bytes([OP_BGM]) + s_str(bgm.encode())
-    sp = chapter_spr(ks)
-    if sp:
-        ops2 += bytes([OP_SPR, 0, 1]) + s_str(sp.encode())
-    prev_spk = None
-    for text, nm, voice in lines:
-        t = text.strip("「」")
-        if not nm:
-            nm = speaker_of(text)
-        if nm and nm != prev_spk and nm in spr_map:
-            ops2 += bytes([OP_SPR, 0, 1]) + s_str(spr_map[nm].encode())
-            prev_spk = nm
-        if voice:
-            ops2 += bytes([OP_VOICE]) + s_str(voice.encode("ascii"))
-        enc = t.encode("utf-8")
-        if len(enc) > 60000:
-            enc = enc[:60000]
-        ops2 += bytes([OP_SAY]) + s_str(nm.encode("utf-8")) + s_str(enc)
+    if EVENTS:
+        # full event stream: background changes + dialogue in true order.
+        # BG events fire many times per line (effect layers redraw the same
+        # stage); only the LAST bg set before a dialogue line matters, so
+        # keep a pending bg and emit it lazily at the next SAY.
+        bgm = bgm_of.get(ks.split("ver")[0])
+        if bgm:
+            ops2 += bytes([OP_BGM]) + s_str(bgm.encode())
+        cur_bg = ""
+        pending = ""
+        for e in lines:
+            if e[0] == "B":
+                bb = bg_names.get(e[1])
+                if bb:
+                    pending = bb
+                continue
+            if e[0] == "C":
+                continue          # sprites await real fgimage assets
+            if pending and pending != cur_bg:
+                ops2 += bytes([OP_BG]) + s_str(pending.encode())
+                cur_bg = pending
+            sp, tx, voice = e[1], e[2], e[3]
+            t = tx.strip("「」")
+            if voice:
+                ops2 += bytes([OP_VOICE]) + s_str(voice.encode("ascii"))
+            enc = t.encode("utf-8")
+            if len(enc) > 60000:
+                enc = enc[:60000]
+            ops2 += bytes([OP_SAY]) + s_str(sp.encode("utf-8")) + s_str(enc)
+    else:
+        ops2 += bytes([OP_BG]) + s_str(bg_file_for(ci).encode())
+        bgm = bgm_of.get(ks.split("ver")[0])
+        if bgm:
+            ops2 += bytes([OP_BGM]) + s_str(bgm.encode())
+        sp = chapter_spr(ks)
+        if sp:
+            ops2 += bytes([OP_SPR, 0, 1]) + s_str(sp.encode())
+        prev_spk = None
+        for text, nm, voice in lines:
+            t = text.strip("「」")
+            if not nm:
+                nm = speaker_of(text)
+            if nm and nm != prev_spk and nm in spr_map:
+                ops2 += bytes([OP_SPR, 0, 1]) + s_str(spr_map[nm].encode())
+                prev_spk = nm
+            if voice:
+                ops2 += bytes([OP_VOICE]) + s_str(voice.encode("ascii"))
+            enc = t.encode("utf-8")
+            if len(enc) > 60000:
+                enc = enc[:60000]
+            ops2 += bytes([OP_SAY]) + s_str(nm.encode("utf-8")) + s_str(enc)
     if next_no is not None:
         ops2 += bytes([OP_NEXT]) + struct.pack("<H", next_no)
     ops2 += bytes([OP_END])
@@ -204,9 +271,10 @@ for ci, ks in enumerate(order):
     g_cur = route_group(ks, ci)
     g_next = route_group(order[ci + 1], ci + 1) if ci + 1 < len(order) else -1
     next_no = ci + 1 if ci + 1 < len(order) and g_cur == g_next else None
-    blob = build(ci, ks, chapters[ks], next_no)
+    src = events[ks] if EVENTS else chapters[ks]
+    blob = build(ci, ks, src, next_no)
     safe = f"{ci:04d}"
-    no = ci + 1
+    nsay = sum(1 for e in src if e[0] == "S") if EVENTS else len(src)
     if ci == 0:
         (outdir / "script.bin").write_bytes(blob)
     else:
@@ -220,7 +288,7 @@ for ci, ks in enumerate(order):
         title = ks.rsplit("ver", 1)[0].rstrip("・").lstrip("0123456789")
     flows.append(f"{ci}\t{title}")
     chsels.append((g_cur, ci, title))
-    idx_lines.append(f"{ks}\t{safe}\t{len(chapters[ks])}\t{len(blob)}")
+    idx_lines.append(f"{ks}\t{safe}\t{nsay}\t{len(blob)}")
 
 (outdir / "chapters.tsv").write_text("\n".join(idx_lines), encoding="utf-8")
 

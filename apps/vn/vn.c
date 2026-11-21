@@ -202,6 +202,7 @@ static uint16_t s_chsel_top;
 static uint8_t  s_set_speed;             /* 0瞬 1快 2普 3慢                 */
 static uint8_t  s_set_auto;              /* 0 off 1快 2普 3慢               */
 static uint8_t  s_set_volume;            /* 0..8                           */
+static uint8_t  s_set_unlock;            /* debug: show all CG / flowchart */
 static uint16_t s_auto_ticks;
 
 /* run state */
@@ -762,11 +763,13 @@ static void flow_visit(uint32_t label_id)
 
 static uint8_t cg_is_seen(uint16_t i)
 {
+    if (s_set_unlock) return 1;
     return (uint8_t)((s_cg_seen[i >> 3] >> (i & 7)) & 1u);
 }
 
 static uint8_t flow_is_seen(uint16_t i)
 {
+    if (s_set_unlock) return 1;
     return (uint8_t)((s_flow_seen[i >> 3] >> (i & 7)) & 1u);
 }
 
@@ -774,24 +777,27 @@ static uint8_t flow_is_seen(uint16_t i)
 
 static void settings_load(void)
 {
-    uint8_t buf[8];
+    uint8_t buf[10];
     s_set_speed = 2;
     s_set_auto = 0;
     s_set_volume = 6;
-    if (hb_fs_read(DIR_BASE "/settings.bin", buf, 8) == 8 &&
+    s_set_unlock = 0;
+    if (hb_fs_read(DIR_BASE "/settings.bin", buf, 10) >= 8 &&
         buf[0] == 'V' && buf[1] == 'N' && buf[2] == 'S' && buf[3] == 'T') {
         if (buf[5] <= 3) s_set_speed = buf[5];
         if (buf[6] <= 3) s_set_auto = buf[6];
         if (buf[7] <= 8) s_set_volume = buf[7];
+        if (buf[9] & 1u) s_set_unlock = 1;
     }
 }
 
 static void settings_save(void)
 {
-    uint8_t buf[8];
+    uint8_t buf[10];
     buf[0] = 'V'; buf[1] = 'N'; buf[2] = 'S'; buf[3] = 'T';
-    buf[4] = 1; buf[5] = s_set_speed; buf[6] = s_set_auto; buf[7] = s_set_volume;
-    hb_fs_write(DIR_BASE "/settings.bin", buf, 8);
+    buf[4] = 2; buf[5] = s_set_speed; buf[6] = s_set_auto; buf[7] = s_set_volume;
+    buf[8] = 0; buf[9] = s_set_unlock ? 1u : 0u;
+    hb_fs_write(DIR_BASE "/settings.bin", buf, 10);
 }
 
 static uint16_t text_delay_ticks(void)
@@ -1945,6 +1951,11 @@ static void compose_settings(void)
             lfill_rect(320 + i * 12, 124, 8, 18, c);
         }
     }
+    draw_button(20, 154, 392, 30, "\xE5\x85\xA8\xE9\x83\xA8\xE8\xA7\xA3\xE9\x94\x81", "UNLOCK ALL", 0x457B9Du);
+    draw_str(s_set_unlock ? "\xE5\xBC\x80" : "\xE5\x85\xB3",   /* 开 / 关 */
+             330, 162, s_set_unlock ? 0x6FCF97u : 0x8D99Aeu);
+    if (!s_font_w) draw_ascii8(330, 164, s_set_unlock ? "ON" : "OFF", 1,
+                               0xFFD166u);
     draw_ascii8(20, 200, "tap row = change   vol = back", 1, 0x8D99Aeu);
 }
 
@@ -1954,6 +1965,7 @@ static void settings_hit(int lx, int ly)
     if (ly >= 40 && ly < 70) s_set_speed = (uint8_t)((s_set_speed + 1) & 3);
     else if (ly >= 78 && ly < 108) s_set_auto = (uint8_t)((s_set_auto + 1) & 3);
     else if (ly >= 116 && ly < 146) s_set_volume = (uint8_t)((s_set_volume + 1) % 9);
+    else if (ly >= 154 && ly < 184) s_set_unlock = (uint8_t)!s_set_unlock;
     else return;
     settings_save();
 }
