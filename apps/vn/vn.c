@@ -1141,11 +1141,22 @@ static void step(void)
                                                    0x7000, 0x7FFF};
                 xmemcpy(path, DIR_BASE "/bgm/", 14);
                 xmemcpy(path + 14, name, dl + 1);
-                xmemcpy(path + 14 + dl, ".wav", 5);
+                xmemcpy(path + 14 + dl, ".WAV", 5);   /* FS is case-sensitive */
                 if (hb_fs_size(path)) s_bgm_play++;
                 else if (s_bgm_miss < 9999) s_bgm_miss++;
                 s_bgm_vol = volmap[s_set_volume];
-                queue_sound(path, s_bgm_vol, 1);
+                /* play immediately + yield (queued playback was silent) */
+                s_dbg_ret = (uint8_t)hb_audio_play_wav_main(path, s_bgm_vol);
+                s_dbg_calls++;
+                {
+                    uint32_t q = xstrlen(path), off = 0, w = 0;
+                    if (q > 20u) off = q - 20u;
+                    while (path[off] && w < sizeof s_dbg_snd - 1u)
+                        s_dbg_snd[w++] = path[off++];
+                    s_dbg_snd[w] = 0;
+                }
+                s_pending_kind = 0;
+                hb_display_wait_vsync();
                 /* the audio API is single-shot: remember the length so the
                    loop tail can restart it (BGM must not stop) */
                 {
@@ -1183,7 +1194,7 @@ static void step(void)
                 uint32_t got, rate, dsize;
                 xmemcpy(path, DIR_BASE "/voice/", 14);
                 xmemcpy(path + 14, name, dl + 1);
-                xmemcpy(path + 14 + dl, ".wav", 5);
+                xmemcpy(path + 14 + dl, ".WAV", 5);   /* FS is case-sensitive */
                 got = hb_fs_read(path, wh, 44);
                 rate = got == 44 ? (uint32_t)wh[24] | ((uint32_t)wh[25] << 8)
                     | ((uint32_t)wh[26] << 16) | ((uint32_t)wh[27] << 24) : 0;
@@ -1198,8 +1209,22 @@ static void step(void)
                     s_voice_ticks = ms / VOICE_TICK_MS + 1u;
                 }
                 s_voice_t0 = s_ticks;
-                if (s_voice_ticks)
-                    queue_sound(path, 0x7FFFu, 2);
+                if (s_voice_ticks) {
+                    /* play IMMEDIATELY (same call shape as the title-screen
+                       test that was audible), then yield to the audio
+                       pthread. The queue + next-frame flush produced no
+                       sound in-scene. */
+                    uint32_t q = xstrlen(path), off = 0, w = 0;
+                    s_dbg_ret = (uint8_t)hb_audio_play_wav_main(path, 0x7FFFu);
+                    s_dbg_calls++;
+                    if (q > 20u) off = q - 20u;
+                    while (path[off] && w < sizeof s_dbg_snd - 1u)
+                        s_dbg_snd[w++] = path[off++];
+                    s_dbg_snd[w] = 0;
+                    s_pending_kind = 0;   /* cancel a queued bgm */
+                    s_bgm_t0 = s_ticks;   /* keep bgm loop from restarting */
+                    hb_display_wait_vsync();
+                }
             }
             break;
         }
@@ -2226,7 +2251,7 @@ void hb_raw_frame(const hb_spoint_t *touch)
         if (dl && 14u + dl + 5u < sizeof bp) {
             xmemcpy(bp, DIR_BASE "/bgm/", 14);
             xmemcpy(bp + 14, s_last_bgm, dl + 1);
-            xmemcpy(bp + 14 + dl, ".wav", 5);
+            xmemcpy(bp + 14 + dl, ".WAV", 5);
             queue_sound(bp, s_bgm_vol, 1);
             s_bgm_t0 = s_ticks;
             hb_audio_play_wav_main(s_pending_snd, s_pending_vol);
