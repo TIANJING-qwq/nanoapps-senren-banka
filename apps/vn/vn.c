@@ -333,11 +333,14 @@ static void rd_str(char *dst, uint16_t dst_size)
 }
 
 /* ----------------------------------------------------- landscape drawing --- */
-/* logical (lx,ly) -> physical fb[lx*240 + ly]; device held rotated 90° CCW */
+/* Device held rotated 90° CW (Home button LEFT): physical top edge faces
+ * the user's right, so logical X grows toward DECREASING physical y:
+ *   fb[(SCR_W-1-lx)*240 + ly]
+ * (the previous lx*240+ly form was the CCW grip — a mirror image.) */
 
 static uint32_t *lpx(int lx, int ly)
 {
-    return hb_raw_fb() + (long)lx * PHW + ly;
+    return hb_raw_fb() + (long)(SCR_W - 1 - lx) * PHW + ly;
 }
 
 static uint32_t rgb565_x(uint16_t p)
@@ -2006,7 +2009,7 @@ void hb_raw_frame(const hb_spoint_t *touch)
 
     s_ticks++;
     if (touch) {                                   /* physical -> logical */
-        lx = touch->y;                             /* logical x = phys y  */
+        lx = SCR_W - 1 - touch->y;                 /* CW grip: phys y grows left */
         ly = touch->x;                             /* logical y = phys x  */
     }
     click = (uint8_t)(touch && touch->down && !s_prev_down);
