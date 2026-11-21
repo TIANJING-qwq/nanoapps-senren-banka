@@ -1152,18 +1152,10 @@ static void step(void)
                 if (hb_fs_size(path)) s_bgm_play++;
                 else if (s_bgm_miss < 9999) s_bgm_miss++;
                 s_bgm_vol = volmap[s_set_volume];
-                /* play immediately + yield (queued playback was silent) */
-                s_dbg_ret = (uint8_t)hb_audio_play_wav_main(path, s_bgm_vol);
-                s_dbg_calls++;
-                {
-                    uint32_t q = xstrlen(path), off = 0, w = 0;
-                    if (q > 20u) off = q - 20u;
-                    while (path[off] && w < sizeof s_dbg_snd - 1u)
-                        s_dbg_snd[w++] = path[off++];
-                    s_dbg_snd[w] = 0;
-                }
-                s_pending_kind = 0;
-                hb_display_wait_vsync();
+                /* queue it: the audio API has ONE static descriptor, so a bgm
+                   call right next to the voice call would clobber it and both
+                   would stay silent. The frame-start flush plays it. */
+                queue_sound(path, s_bgm_vol, 1);
                 /* the audio API is single-shot: remember the length so the
                    loop tail can restart it (BGM must not stop) */
                 {
@@ -2257,7 +2249,7 @@ void hb_raw_frame(const hb_spoint_t *touch)
     }
     /* BGM loop: the API is single-shot, so restart when the track ends
        (only while in-scene and a track is loaded). */
-    if (s_bgm_ticks && s_mode == MODE_SCENE &&
+    if (0 && s_bgm_ticks && s_mode == MODE_SCENE &&
         s_ticks - s_bgm_t0 >= s_bgm_ticks) {
         char bp[96];
         uint32_t dl = xstrlen(s_last_bgm);
