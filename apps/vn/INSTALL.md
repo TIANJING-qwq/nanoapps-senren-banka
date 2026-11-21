@@ -44,13 +44,18 @@
 
 ## 四、从游戏原始文件重新生成数据包（Windows，已验证）
 
+前提：KrkrExtract 已 dump 到 `K:\千恋＊万花\outPath`（剧本/立绘/背景
+/BGM/语音真名文件）。
+
 ```
 cd NanoApps
 python tools/unpack_xp3.py extract "K:\千恋＊万花\bgimage720.xp3" build/sb_bg --decrypt "K:\千恋＊万花\补丁\解密补丁\xp3filter.tjs"
 python tools/scn_carve.py    "K:\千恋＊万花\scenario.pck" build/sb_scn
 python tools/sb_extract.py   build/sb_scn  build/sb_dialogue.tsv
+python tools/sb_tjs_extract.py          # 权威：说话人+语音名+章BGM (约6分钟)
 python tools/sb_topack.py    build/sb_dialogue.tsv build/sb_pack
-python tools/sb_bgimport.py  build/sb_full
+python tools/sb_bgimport.py  build/sb_full          # bg 逻辑名表
+python tools/sb_bgimport2.py build/sb_full          # 真名精确直连 83/115
 python tools/sb_sprimport.py build/sb_full 2000
 python tools/sb_cgimport.py  build/sb_full
 python tools/sb_fullpack.py  build/sb_pack  build/sb_full
