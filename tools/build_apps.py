@@ -273,7 +273,9 @@ def build_screens():
 def main(apps, out=None):
     # Regenerate the surface screen DB from the source screens (tools/screens/)
     # so the dim/no-dim screens always match the committed source.
-    if (ROOT / "tools" / "screens").is_dir():
+    # SKIP_SCREENS=1: per-app packaging only — the screen DB is a firmware-level
+    # resource (already on the device), and building it requires cargo+silverutil.
+    if (ROOT / "tools" / "screens").is_dir() and not os.environ.get("SKIP_SCREENS"):
         build_screens()
     # Build each distributable folder from scratch; the temporary .app metadata
     # and combined staging index are build inputs, not public bundle contents.

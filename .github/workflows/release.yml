@@ -32,7 +32,7 @@ jobs:
           ./start build vn
       - name: Package .nanoapp folder
         run: |
-          python tools/build_apps.py vn
+          SKIP_SCREENS=1 python tools/build_apps.py vn
           ls -R /tmp/hbapps/Apps
           cd /tmp/hbapps && zip -r "$GITHUB_WORKSPACE/vn-nanoapp.zip" Apps
       - uses: actions/upload-artifact@v4
