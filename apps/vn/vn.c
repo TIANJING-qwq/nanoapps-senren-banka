@@ -240,6 +240,9 @@ static uint8_t  s_prev_back;
 static int16_t  s_dbg_lx = -1, s_dbg_ly = -1;      /* touch debug readout */
 static uint8_t  s_skip;                  /* skip-to-choice fast-forward   */
 static char     s_last_bgm[SAVENAME_MAX];
+static uint32_t s_bgm_ticks;             /* length of current bgm, frames */
+static uint32_t s_bgm_t0;                /* frame it (re)started at       */
+static uint16_t s_bgm_vol;               /* volume of the current bgm     */
 static uint32_t s_voice_ticks;  /* voice window length in frames (~33ms) */
 static uint32_t s_voice_t0;     /* frame counter when it started       */
 #define VOICE_TICK_MS 33u       /* one s_ticks frame ≈ 33 ms            */
@@ -1138,7 +1141,23 @@ static void step(void)
                 xmemcpy(path + 14 + dl, ".wav", 5);
                 if (hb_fs_size(path)) s_bgm_play++;
                 else if (s_bgm_miss < 9999) s_bgm_miss++;
-                queue_sound(path, volmap[s_set_volume], 1);
+                s_bgm_vol = volmap[s_set_volume];
+                queue_sound(path, s_bgm_vol, 1);
+                /* the audio API is single-shot: remember the length so the
+                   loop tail can restart it (BGM must not stop) */
+                {
+                    uint8_t wh[44];
+                    uint32_t rate, dsize, ms = 0;
+                    if (hb_fs_read(path, wh, 44) == 44) {
+                        rate = (uint32_t)wh[24] | ((uint32_t)wh[25] << 8) |
+                               ((uint32_t)wh[26] << 16) | ((uint32_t)wh[27] << 24);
+                        dsize = (uint32_t)wh[40] | ((uint32_t)wh[41] << 8) |
+                                ((uint32_t)wh[42] << 16) | ((uint32_t)wh[43] << 24);
+                        if (rate) ms = dsize / (rate / 500u ? rate / 500u : 1u);
+                    }
+                    s_bgm_ticks = ms ? ms / VOICE_TICK_MS : 0u;
+                    s_bgm_t0 = s_ticks;
+                }
                 xmemcpy(s_last_bgm, name, dl + 1);            }
             break;
         }
@@ -1534,37 +1553,8 @@ static void compose_title(void)
             draw_str("\xE5\x8D\x83\xE6\x81\x8B\xE4\xB8\x87\xE8\x8A\xB1", /* 千恋万花 */
                      6, 12, 0xFFD166u);
     }
-    /* ---- AUDIO SELF-TEST: T44 (44.1k) -> T16 (16k) -> OS resource sound.
-     * Which one is audible tells us which formats the device decodes. */
-    {
-        static uint32_t t0;
-        static uint8_t step;
-        uint32_t el;
-        const char *lab;
-        char ab[32];
-        int k = 0;
-        if (!t0) t0 = s_ticks;
-        el = (s_ticks - t0) / 30u;
-        if (el >= 3u && step == 0) {
-            hb_audio_play_wav_main(DIR_BASE "/voice/T44.WAV", 0x7FFFu);
-            hb_display_wait_vsync();
-            step = 1;
-        } else if (el >= 8u && step == 1) {
-            hb_audio_play_wav_main(DIR_BASE "/voice/T16.WAV", 0x7FFFu);
-            hb_display_wait_vsync();
-            step = 2;
-        } else if (el >= 13u && step == 2) {
-            hb_audio_play_wav("Resources/Sounds/shake.wav", 0x7FFFu);
-            hb_display_wait_vsync();
-            step = 3;
-        }
-        lab = step == 0 ? "AUDIO:ready" :
-              step == 1 ? "AUDIO:T44 sent" :
-              step == 2 ? "AUDIO:T16 sent" : "AUDIO:SHAKE sent";
-        while (lab[k] && k < 30) { ab[k] = lab[k]; k++; }
-        ab[k] = 0;
-        draw_ascii8(6, 30, ab, 1, 0x6FCF97u);
-    }
+    /* ---- AUDIO SELF-TEST removed: all three formats (44.1k, 16k, OS
+     * resource) were confirmed audible on device. ---- */
 }
 
 static void title_hit(int lx, int ly)
@@ -2264,6 +2254,23 @@ void hb_raw_frame(const hb_spoint_t *touch)
         s_pending_kind = 0;
         s_pending_snd[0] = 0;
         hb_display_wait_vsync();
+    }
+    /* BGM loop: the API is single-shot, so restart when the track ends
+       (only while in-scene and a track is loaded). */
+    if (s_bgm_ticks && s_mode == MODE_SCENE &&
+        s_ticks - s_bgm_t0 >= s_bgm_ticks) {
+        char bp[96];
+        uint32_t dl = xstrlen(s_last_bgm);
+        if (dl && 14u + dl + 5u < sizeof bp) {
+            xmemcpy(bp, DIR_BASE "/bgm/", 14);
+            xmemcpy(bp + 14, s_last_bgm, dl + 1);
+            xmemcpy(bp + 14 + dl, ".wav", 5);
+            queue_sound(bp, s_bgm_vol, 1);
+            s_bgm_t0 = s_ticks;
+            hb_audio_play_wav_main(s_pending_snd, s_pending_vol);
+            s_pending_kind = 0;
+            hb_display_wait_vsync();
+        }
     }
 
     if (s_prev_mode != s_mode) {          /* mode switch: full repaint */
