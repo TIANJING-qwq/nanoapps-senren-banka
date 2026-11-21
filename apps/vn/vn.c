@@ -205,6 +205,28 @@ static uint8_t  s_set_volume;            /* 0..8                           */
 static uint8_t  s_set_unlock;            /* debug: show all CG / flowchart */
 static uint8_t  s_need_full;             /* repaint bg+sprites this frame  */
 static uint8_t  s_prev_mode = 0xFFu;     /* detect mode switches           */
+
+/* Audio: the SDK spawns a pthread for loadFile+play and that pthread only
+ * gets CPU when the caller yields. A tight 60 fps redraw loop STARVES it
+ * (SDK: "...or block on a long sleep. A tight UI loop ... will STARVE the
+ * pthread and no sound plays."). So sounds are queued here and started at
+ * the very end of the frame, followed by a vsync wait which both paces the
+ * loop and hands the CPU to the audio worker. */
+static char     s_pending_snd[96];
+static uint16_t s_pending_vol;
+static uint8_t  s_pending_kind;          /* 0 none, 1 bgm, 2 voice        */
+
+static void queue_sound(const char *path, uint16_t vol, uint8_t kind)
+{
+    uint32_t i = 0;
+    while (path[i] && i < sizeof s_pending_snd - 1u) {
+        s_pending_snd[i] = path[i];
+        i++;
+    }
+    s_pending_snd[i] = 0;
+    s_pending_vol = vol;
+    s_pending_kind = kind;
+}
 static uint16_t s_auto_ticks;
 
 /* run state */
@@ -1114,12 +1136,10 @@ static void step(void)
                 xmemcpy(path, DIR_BASE "/bgm/", 14);
                 xmemcpy(path + 14, name, dl + 1);
                 xmemcpy(path + 14 + dl, ".wav", 5);
-                if (hb_audio_play_wav_main(path, volmap[s_set_volume]))
-                    s_bgm_play++;
-                else if (s_bgm_miss < 9999)
-                    s_bgm_miss++;
-                xmemcpy(s_last_bgm, name, dl + 1);
-            }
+                if (hb_fs_size(path)) s_bgm_play++;
+                else if (s_bgm_miss < 9999) s_bgm_miss++;
+                queue_sound(path, volmap[s_set_volume], 1);
+                xmemcpy(s_last_bgm, name, dl + 1);            }
             break;
         }
         case OP_VOICE: {
@@ -1157,7 +1177,7 @@ static void step(void)
                 }
                 s_voice_t0 = s_ticks;
                 if (s_voice_ticks)
-                    hb_audio_play_wav_main(path, 0x7FFFu);
+                    queue_sound(path, 0x7FFFu, 2);
             }
             break;
         }
@@ -2382,6 +2402,15 @@ void hb_raw_frame(const hb_spoint_t *touch)
     lfill_rect(SCR_W - 34, 6, 28, 20, 0x1D3557u);
     draw_ascii8(SCR_W - 30, 10, "MENU", 1, 0xF1FAEEu);
     if (s_wait == 0 && s_reveal >= page_chars()) draw_arrow();
-    compose_toast();
-    compose_touchdbg();
+    /* ---- frame tail: start any queued sound, then hand the CPU over ----
+     * The audio pthread needs this app to yield; hb_display_wait_vsync()
+     * blocks until the next vblank (~16 ms) which both paces the loop and
+     * lets the audio worker actually run. Without it every clip dies
+     * silently (SDK: a tight UI loop STARVES the audio pthread). */
+    if (s_pending_kind) {
+        hb_audio_play_wav_main(s_pending_snd, s_pending_vol);
+        s_pending_kind = 0;
+        s_pending_snd[0] = 0;
+        hb_display_wait_vsync();      /* give the worker its slice */
+    }
 }
