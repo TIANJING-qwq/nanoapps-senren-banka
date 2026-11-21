@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
-"""Convert sb_dialogue.tsv into per-chapter VNPK script.bin volumes.
+"""Convert dialogue into per-chapter VNPK script.bin volumes.
 
 Opcode set (engine-locked): 0 END, 1 LABEL u32, 2 BG str, 3 SPR u8 u8 str,
 4 SPRCLR u8, 5 BGM str, 6 SAY str-name str-text, 7 CHOICE, 8 JUMP u32,
-9 WAIT u16.  Script header: VNPK u32 ver u32 nlabels u32 labels[nlabels].
+9 WAIT u16, 10 NEXT u16, 11 VOICE str.  Header: VNPK u32 ver u32 nlabels
+u32 labels[nlabels].
+
+Input priority: sb_tjs.tsv (base, speaker, text, voice — authoritative,
+from the KrkrExtract .psb.tjs dump) over sb_dialogue.tsv (offsets only).
+
+Also emits chsel.idx (VNCS): grouped route list 共通0/芳乃1/茉子2/丛雨3/
+レナ4/小春・芦花5/后日谈6.
 """
+import re
 import struct
 import sys
 from pathlib import Path
@@ -14,7 +22,7 @@ outdir = Path(sys.argv[2])
 outdir.mkdir(parents=True, exist_ok=True)
 
 OP_END, OP_LABEL, OP_BG, OP_SPR, OP_SPRCLR, OP_BGM, OP_SAY, OP_CHOICE, \
-    OP_JUMP, OP_WAIT, OP_NEXT = range(11)
+    OP_JUMP, OP_WAIT, OP_NEXT, OP_VOICE = range(12)
 
 chapters = {}
 order = []
@@ -56,44 +64,38 @@ def bg_file_for(ci):
                 continue
             return pick
     return "bg_school"
-for line in tsv.read_text(encoding="utf-8").splitlines():
-    ks, off, text = line.split("\t", 2)
-    if ks not in chapters:
-        chapters[ks] = []
-        order.append(ks)
-    chapters[ks].append(text)
-
-# speaker table from KrkrExtract .ks.ks.txt dump: base -> [(text, speaker)]
-spk_tbl = {}
-spk_path = Path("NanoApps/build/sb_speakers.tsv")
-if spk_path.exists():
-    for ln in spk_path.read_text(encoding="utf-8").splitlines():
-        base, sp, t = ln.split("\t", 2)
-        spk_tbl.setdefault(base, []).append((t, sp))
-print(f"speakers: {len(spk_tbl)} chapters, "
-      f"{sum(len(v) for v in spk_tbl.values())} lines")
-
-
-def chapter_base(ks):
-    return ks.split("ver")[0]
-
-
-def speaker_iter(ks):
-    """yield speaker for each dialogue text, aligned by exact text match
-    against the ks dump queue (dialogue may skip lines; never reorder)."""
-    q = spk_tbl.get(chapter_base(ks), [])
-    qi = 0
-    for text in chapters[ks]:
-        t = text.strip("「」『』")
-        while qi < len(q):
-            kt, ksp = q[qi]
-            qi += 1
-            if kt.strip("「」『』") == t:
-                yield ksp
-                break
-            # ks line not in dialogue list -> skip it
-        else:
-            yield ""
+chapters = {}          # base -> [(text, speaker, voice)]
+order = []
+bgm_of = {}
+bgm_path = Path("NanoApps/build/sb_bgms.tsv")
+if bgm_path.exists():
+    for ln in bgm_path.read_text(encoding="utf-8").splitlines():
+        if "\t" in ln:
+            b, g = ln.split("\t", 1)
+            bgm_of[b] = g
+tjs_path = Path("NanoApps/build/sb_tjs.tsv")
+if tjs_path.exists():
+    for ln in tjs_path.read_text(encoding="utf-8").splitlines():
+        parts = ln.split("\t")
+        if len(parts) < 3:
+            continue
+        base, sp, tx = parts[0], parts[1], parts[2]
+        v = parts[3] if len(parts) > 3 and parts[3] else ""
+        base = re.sub(r"\.ks(\.psb)?(\.tjs)?$", "", base)
+        if base not in chapters:
+            chapters[base] = []
+            order.append(base)
+        chapters[base].append((tx, sp, v))
+    print(f"source: sb_tjs.tsv ({sum(len(v) for v in chapters.values())}"
+          " lines with speakers+voice)")
+else:
+    for line in tsv.read_text(encoding="utf-8").splitlines():
+        ks, off, text = line.split("\t", 2)
+        ks = ks.rsplit("ver", 1)[0].rstrip("・").rstrip(".ks")
+        if ks not in chapters:
+            chapters[ks] = []
+            order.append(ks)
+        chapters[ks].append((text, "", ""))
 
 
 NAMES = ("芳乃", "茉子", "蕾娜", "小春", "芦花", "将臣", "廉太郎", "ムラサメ",
@@ -111,6 +113,27 @@ def s_str(b):
     return struct.pack("<H", len(b)) + b
 
 
+def route_group(base, ci):
+    """0 共通 / 1 芳乃 / 2 茉子 / 3 丛雨 / 4 レナ / 5 小春・芦花 / 6 后日谈.
+    Chapter numbers: 0xx common, 1xx Yoshino, 2xx Makoto, 3xx Murasame,
+    4xx Rena, 5xx Koharu&Roka; a title with 'after' marks an epilogue."""
+    m = re.match(r"^(\d+)", base)
+    no = int(m.group(1)) if m else ci
+    if re.search(r"ａｆｔｅｒ|after", base, re.I):
+        return 6
+    if no < 100:
+        return 0
+    if no < 200:
+        return 1
+    if no < 300:
+        return 2
+    if no < 400:
+        return 3
+    if no < 500:
+        return 4
+    return 5
+
+
 def build(ci, ks, lines, next_no):
     ops2 = bytearray()
     labels2 = []
@@ -118,17 +141,22 @@ def build(ci, ks, lines, next_no):
     labels2.append(hdr_len)
     ops2 += bytes([OP_LABEL]) + struct.pack("<I", 0)
     ops2 += bytes([OP_BG]) + s_str(bg_file_for(ci).encode())
+    bgm = bgm_of.get(ks.split("ver")[0])
+    if bgm:
+        ops2 += bytes([OP_BGM]) + s_str(bgm.encode())
     sp = chapter_spr(ks)
     if sp:
         ops2 += bytes([OP_SPR, 0, 1]) + s_str(sp.encode())
     prev_spk = None
-    for text, nm in zip(lines, speaker_iter(ks)):
+    for text, nm, voice in lines:
         t = text.strip("「」")
         if not nm:
             nm = speaker_of(text)
         if nm and nm != prev_spk and nm in spr_map:
             ops2 += bytes([OP_SPR, 0, 1]) + s_str(spr_map[nm].encode())
             prev_spk = nm
+        if voice:
+            ops2 += bytes([OP_VOICE]) + s_str(voice.encode("ascii"))
         enc = t.encode("utf-8")
         if len(enc) > 60000:
             enc = enc[:60000]
@@ -145,6 +173,7 @@ def build(ci, ks, lines, next_no):
 
 idx_lines = []
 flows = []
+chsels = []
 for ci, ks in enumerate(order):
     next_no = ci + 1 if ci + 1 < len(order) else None
     blob = build(ci, ks, chapters[ks], next_no)
@@ -158,6 +187,7 @@ for ci, ks in enumerate(order):
     # chapter title: strip ver suffix and numeric prefix
     title = ks.rsplit("ver", 1)[0].rstrip("・").lstrip("0123456789")
     flows.append(f"{ci}\t{title}")
+    chsels.append((route_group(ks, ci), ci, title))
     idx_lines.append(f"{ks}\t{safe}\t{len(chapters[ks])}\t{len(blob)}")
 
 (outdir / "chapters.tsv").write_text("\n".join(idx_lines), encoding="utf-8")
@@ -169,6 +199,17 @@ for row in flows:
     tb = title.encode("utf-8")
     fb += struct.pack("<IH", int(ci), len(tb)) + tb
 (outdir / "flow.idx").write_bytes(fb)
-print(f"{len(order)} chapters, flow.idx {len(fb)}B; first 5:")
+
+# chsel.idx: VNCS u16 ver(1) u16 n, then n x (u8 group, u16 chapter,
+# u16 nlen, name[]) — grouped chapter list for the 章节选择 screen
+cb = bytearray(b"VNCS") + struct.pack("<HH", 1, len(chsels))
+for grp, ci, title in chsels:
+    tb = title.encode("utf-8")
+    cb += struct.pack("<BHH", grp, ci, len(tb)) + tb
+(outdir / "chsel.idx").write_bytes(cb)
+groups = [g for g, _, _ in chsels]
+print(f"{len(order)} chapters, flow.idx {len(fb)}B, chsel.idx {len(cb)}B "
+      f"(groups: " + "/".join(str(groups.count(i)) for i in range(7)) + ")")
+print("first 5:")
 for l in idx_lines[:5]:
     print(" ", l)

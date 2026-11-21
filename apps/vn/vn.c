@@ -59,7 +59,7 @@
 /* ------------------------------------------------------------- pack caps --- */
 
 #define SCRIPT_MAX      (384u * 1024u)
-#define FONT_GLYPH_MAX  3000
+#define FONT_GLYPH_MAX  3400
 #define FONT_W_MAX      24
 #define FONT_H_MAX      24
 #define FONT_FILE_MAX   (10u + (FONT_GLYPH_MAX) * (4u + (FONT_H_MAX) * 3u))
@@ -88,6 +88,7 @@
 #define OP_SPR     0x03   /* u8 slot, u8 pos, u16 nlen, name[]          */
 #define OP_SPRCLR  0x04   /* u8 mask                                    */
 #define OP_BGM     0x05   /* u16 nlen, name[]                           */
+#define OP_VOICE   0x0B   /* u16 nlen, name[] — line voice clip          */
 #define OP_SAY     0x06   /* u16 nlen, name[], u16 tlen, text[]         */
 #define OP_CHOICE  0x07   /* u8 n, n * (u32 label, u16 tlen, text[])    */
 #define OP_JUMP    0x08   /* u32 label_id                               */
@@ -109,6 +110,7 @@ enum {
     MODE_GALLERY,         /* CG grid                                     */
     MODE_CGVIEW,          /* CG fullscreen                               */
     MODE_FLOW,            /* flowchart / chapter jump                    */
+    MODE_CHSEL,           /* chapter select by route (共通/个人/后日谈)  */
     MODE_SETTINGS,
     MODE_END,
     MODE_ERROR,
@@ -177,6 +179,15 @@ static uint8_t  s_flow_seen[(FLOW_MAX + 7) / 8];
 static uint16_t s_flow_top;              /* scroll line                    */
 static uint8_t  s_seen_dirty;
 
+/* chapter select (VNCS): grouped route list 共通/个人线/后日谈 */
+#define CHSEL_MAX  96
+#define CHSEL_GROUP_N 7
+static uint16_t s_chsel_n;
+static uint8_t  s_chsel_group[CHSEL_MAX];
+static uint16_t s_chsel_ch[CHSEL_MAX];
+static char     s_chsel_title[CHSEL_MAX][NAME_MAX];
+static uint16_t s_chsel_top;
+
 /* settings */
 static uint8_t  s_set_speed;             /* 0瞬 1快 2普 3慢                 */
 static uint8_t  s_set_auto;              /* 0 off 1快 2普 3慢               */
@@ -193,6 +204,8 @@ static uint8_t  s_prev_ffwd;
 static uint8_t  s_prev_back;
 static uint8_t  s_skip;                  /* skip-to-choice fast-forward   */
 static char     s_last_bgm[SAVENAME_MAX];
+static uint32_t s_voice_ms;    /* current line's voice duration, 0 = none */
+static uint32_t s_voice_t0;    /* tick when it started */
 static uint32_t s_err;
 static uint8_t  s_save_valid;
 static uint32_t s_save_off;
@@ -1061,6 +1074,41 @@ static void step(void)
             }
             break;
         }
+        case OP_VOICE: {
+            /* u16 nlen, name[] — play /Data/vn/voice/<name>.wav for this
+               line. VOICE runs right before its SAY, so s_voice_ms/t0
+               still describe the PREVIOUS line here: if that clip is
+               inside its window we stay silent (device API is
+               single-shot); switching lines never chains audio. */
+            char name[SAVENAME_MAX], path[96];
+            uint32_t dl;
+            rd_str(name, (uint16_t)sizeof name);
+            s_voice_ms = 0;
+            if (!name[0]) break;
+            if (s_ticks - s_voice_t0 < s_voice_ms)
+                break;                       /* previous clip still active */
+            dl = xstrlen(name);
+            if (14u + dl + 5u < sizeof path) {
+                uint8_t wh[44];
+                uint32_t got, rate, dsize;
+                xmemcpy(path, DIR_BASE "/voice/", 14);
+                xmemcpy(path + 14, name, dl + 1);
+                xmemcpy(path + 14 + dl, ".wav", 5);
+                got = hb_fs_read(path, wh, 44);
+                rate = got == 44 ? (uint32_t)wh[24] | ((uint32_t)wh[25] << 8)
+                    | ((uint32_t)wh[26] << 16) | ((uint32_t)wh[27] << 24) : 0;
+                dsize = got == 44 ? (uint32_t)wh[40] | ((uint32_t)wh[41] << 8)
+                    | ((uint32_t)wh[42] << 16) | ((uint32_t)wh[43] << 24) : 0;
+                if (rate) {
+                    s_voice_ms = dsize / (rate / 1000u + 1u);
+                    if (s_voice_ms > 60000u) s_voice_ms = 60000u;
+                }
+                s_voice_t0 = s_ticks;
+                if (s_voice_ms)
+                    hb_audio_play_wav_main(path, 0x7FFFu);
+            }
+            break;
+        }
         case OP_SAY: {
             uint32_t off = op_pc, i;
             uint16_t n;
@@ -1204,10 +1252,25 @@ static void draw_nameplate(const char *name)
 
 static void compose_textbox(void)
 {
-    ldim_rect(BOX_X, BOX_Y, BOX_W, BOX_H, 70);
+    /* gradient: strong at the bottom, fading toward the top (原版风) */
+    int y;
+    for (y = 0; y < BOX_H; y++) {
+        int a = 40 + (140 * (BOX_H - 1 - y)) / (BOX_H - 1);  /* 40..180 */
+        ldim_rect(BOX_X, BOX_Y + y, BOX_W, 1, (uint8_t)a);
+    }
     lrect_outline(BOX_X, BOX_Y, BOX_W, BOX_H, 1, 0x3A86FFu);
     if (s_have_name && s_font_w)
         draw_nameplate(s_say_name);
+    /* voice progress bar: small strip along the textbox bottom (原版风) */
+    if (s_voice_ms) {
+        uint32_t el = s_ticks - s_voice_t0;
+        uint32_t frac = el >= s_voice_ms ? 8 : (uint32_t)((uint64_t)el * 8u
+                                                          / s_voice_ms);
+        int bw = (BOX_W - 24) / 8 * (int)frac;
+        lfill_rect(BOX_X + 12, BOX_Y + BOX_H - 5, BOX_W - 24, 2, 0x2A2D3Au);
+        if (bw > 0)
+            lfill_rect(BOX_X + 12, BOX_Y + BOX_H - 5, bw, 2, 0xE8998Du);
+    }
 }
 
 static void draw_button(int x, int y, int w, int h, const char *cjk,
@@ -1270,20 +1333,21 @@ static void draw_title_bg(void)
 #define TITLE_W   118
 #define TITLE_Y0  42
 #define TITLE_DY  31
-#define TITLE_N   6
+#define TITLE_N   7
 
 static void compose_title(void)
 {
     static const char *const cjk[TITLE_N] = {
         "\xE5\xBC\x80\xE5\xA7\x8B\xE6\xB8\xB8\xE6\x88\x8F",        /* 开始游戏 */
         "\xE7\xBB\xA7\xE7\xBB\xAD\xE6\xB8\xB8\xE6\x88\x8F",        /* 继续游戏 */
+        "\xE7\xAB\xA0\xE8\x8A\x82\xE9\x80\x89\xE6\x8B\xA9",        /* 章节选择 */
         "\xE8\xAF\xBB\xE6\xA1\xA3",                                /* 读档     */
         "CG\xE9\x89\xB4\xE8\xB5\x8F",                              /* CG鉴赏   */
         "\xE6\xB5\x81\xE7\xA8\x8B\xE5\x9B\xBE",                    /* 流程图   */
         "\xE8\xAE\xBE\xE7\xBD\xAE",                                /* 设置     */
     };
     static const char *const asc[TITLE_N] = {
-        "START", "CONTINUE", "LOAD", "CG MODE", "FLOW", "CONFIG",
+        "START", "CONTINUE", "CHAPTERS", "LOAD", "CG MODE", "FLOW", "CONFIG",
     };
     int i;
     draw_title_bg();
@@ -1316,11 +1380,13 @@ static void title_hit(int lx, int ly)
                     save_load();                     /* re-read latest auto */
                     if (s_save_valid) continue_game();
                 } return;
-        case 2: s_slot_pick = MODE_LOAD; s_ret_mode = MODE_TITLE;
+        case 2: if (s_chsel_n) { s_mode = MODE_CHSEL; s_chsel_top = 0; }
+                return;
+        case 3: s_slot_pick = MODE_LOAD; s_ret_mode = MODE_TITLE;
                 s_mode = MODE_SAVELOAD; return;
-        case 3: s_mode = MODE_GALLERY; s_cg_page = 0; return;
-        case 4: s_mode = MODE_FLOW; s_flow_top = 0; return;
-        case 5: s_ret_mode = MODE_TITLE; s_mode = MODE_SETTINGS; return;
+        case 4: s_mode = MODE_GALLERY; s_cg_page = 0; return;
+        case 5: s_mode = MODE_FLOW; s_flow_top = 0; return;
+        case 6: s_ret_mode = MODE_TITLE; s_mode = MODE_SETTINGS; return;
         }
     }
 }
@@ -1673,6 +1739,103 @@ static void flow_hit(int lx, int ly)
     }
 }
 
+/* ------------------------------------------------------- chapter select --- */
+
+/* chsel.idx: "VNCS" u16 ver(1) u16 n, then n x (u8 group, u16 chapter,
+   u16 nlen, name[]). group: 0 共通 1 芳乃 2 茉子 3 丛雨 4 レナ 5 小春
+   6 后日谈 */
+static const char *const CHSEL_GROUP_CJK[CHSEL_GROUP_N] = {
+    "\xE5\x85\xB1\xE9\x80\x9A\xE7\xBA\xBF",                    /* 共通线 */
+    "\xE8\x8A\xB3\xE4\xB9\x83\xE7\xBA\xBF",                    /* 芳乃线 */
+    "\xE8\x8C\x89\xE5\xAD\x90\xE7\xBA\xBF",                    /* 茉子线 */
+    "\xE4\xB8\x9B\xE9\x9B\xA8\xE7\xBA\xBF",                    /* 丛雨线 */
+    "\xE8\x95\xBE\xE5\xA8\x9C\xE7\xBA\xBF",                    /* 蕾娜线 */
+    "\xE5\xB0\x8F\xE6\x98\xA5\xE3\x83\xBB\xE8\x8A\xA6\xE8\x8A\xB1\xE7\xBA\xBF", /* 小春・芦花线 */
+    "\xE5\x90\x8E\xE6\x97\xA5\xE8\xB0\x88",                    /* 后日谈 */
+};
+
+static void load_chsel(void)
+{
+    static uint8_t buf[8 + CHSEL_MAX * (3 + NAME_MAX)];
+    uint32_t got, off;
+    uint16_t n, i;
+    s_chsel_n = 0;
+    got = hb_fs_read(DIR_BASE "/chsel.idx", buf, sizeof buf);
+    if (got < 8 || buf[0] != 'V' || buf[1] != 'N' || buf[2] != 'C' ||
+        buf[3] != 'S')
+        return;
+    n = (uint16_t)((uint16_t)buf[6] | ((uint16_t)buf[7] << 8));
+    if (n > CHSEL_MAX) n = CHSEL_MAX;
+    off = 8;
+    for (i = 0; i < n && off + 5u <= got; i++) {
+        uint16_t l, j;
+        s_chsel_group[i] = buf[off] & 7u;
+        s_chsel_ch[i] = (uint16_t)((uint16_t)buf[off + 1] |
+                                   ((uint16_t)buf[off + 2] << 8));
+        l = (uint16_t)((uint16_t)buf[off + 3] | ((uint16_t)buf[off + 4] << 8));
+        off += 5;
+        if (l > NAME_MAX - 1u) l = NAME_MAX - 1u;
+        if (off + l > got) break;
+        for (j = 0; j < l; j++)
+            s_chsel_title[i][j] = (char)buf[off + j];
+        s_chsel_title[i][l] = 0;
+        off += l;
+    }
+    s_chsel_n = (uint16_t)i;
+}
+
+static void compose_chsel(void)
+{
+    int i, y = 30;
+    uint8_t last_g = 0xFF;
+    lfill_rect(0, 0, SCR_W, SCR_H, 0x0B132Bu);
+    if (s_font_w)
+        draw_str("\xE7\xAB\xA0\xE8\x8A\x82\xE9\x80\x89\xE6\x8B\xA9", 12, 6,
+                 0xF1FAEEu);                                   /* 章节选择 */
+    else
+        draw_ascii8(12, 8, "CHAPTERS", 2, 0xF1FAEEu);
+    for (i = s_chsel_top; i < s_chsel_n && y < SCR_H - 24; i++) {
+        if (s_chsel_group[i] != last_g && s_font_w) {
+            if (s_chsel_group[i] < CHSEL_GROUP_N)
+                draw_str(CHSEL_GROUP_CJK[s_chsel_group[i]], 20, y,
+                         0xE8998Du);
+            y += 18;
+            last_g = s_chsel_group[i];
+            if (y >= SCR_H - 24) break;
+        }
+        draw_button(20, y, 320, 20, s_chsel_title[i], "", 0x457B9Du);
+        y += 22;
+    }
+    draw_ascii8(12, SCR_H - 18, "tap=go  tap-low=scrol  vol=back", 1,
+                0x8D99Aeu);
+}
+
+static void chsel_hit(int lx, int ly)
+{
+    int i, y = 30;
+    uint8_t last_g = 0xFF;
+    if (ly >= SCR_H - 24) {                    /* bottom strip = scroll */
+        s_chsel_top = (uint16_t)((s_chsel_top + 8) %
+                                 (s_chsel_n ? s_chsel_n : 1));
+        return;
+    }
+    for (i = s_chsel_top; i < s_chsel_n && y < SCR_H - 24; i++) {
+        if (s_chsel_group[i] != last_g) {
+            y += 18;
+            last_g = s_chsel_group[i];
+            if (y >= SCR_H - 24) break;
+        }
+        if (lx >= 20 && lx < 340 && ly >= y && ly < y + 20) {
+            if (load_script_chapter(s_chsel_ch[i])) {
+                s_mode = MODE_SCENE;
+                step();
+            }
+            return;
+        }
+        y += 22;
+    }
+}
+
 /* -------------------------------------------------------------- settings --- */
 
 static const char *const SPEED_CJK[] = {"\xE7\x9E\xAC\xE9\x97\xB4", "\xE5\xBF\xAB", "\xE6\x99\xAE\xE9\x80\x9A", "\xE6\x85\xA2"};
@@ -1810,6 +1973,7 @@ void hb_raw_init(int w, int h)
     load_font();
     load_cgidx();
     load_flowidx();
+    load_chsel();
     seen_load();
     save_load();
     load_slots_meta();
@@ -1850,7 +2014,7 @@ void hb_raw_frame(const hb_spoint_t *touch)
     /* VOL_UP edge: leave list screens back to title */
     if (ffwd && !s_prev_ffwd) {
         switch (s_mode) {
-        case MODE_GALLERY: case MODE_CGVIEW: case MODE_FLOW:
+        case MODE_GALLERY: case MODE_CGVIEW: case MODE_FLOW: case MODE_CHSEL:
             seen_flush();
             s_mode = MODE_TITLE;
             break;
@@ -1874,7 +2038,7 @@ void hb_raw_frame(const hb_spoint_t *touch)
         case MODE_SCENE:
             rewind_line();
             break;
-        case MODE_GALLERY: case MODE_CGVIEW: case MODE_FLOW:
+        case MODE_GALLERY: case MODE_CGVIEW: case MODE_FLOW: case MODE_CHSEL:
             seen_flush();
             s_mode = MODE_TITLE;
             break;
@@ -1913,6 +2077,9 @@ void hb_raw_frame(const hb_spoint_t *touch)
         break;
     case MODE_FLOW:
         if (click) flow_hit(lx, ly);
+        break;
+    case MODE_CHSEL:
+        if (click) chsel_hit(lx, ly);
         break;
     case MODE_SETTINGS:
         if (click) settings_hit(lx, ly);
@@ -1969,6 +2136,7 @@ void hb_raw_frame(const hb_spoint_t *touch)
     case MODE_GALLERY: compose_gallery(); compose_toast(); return;
     case MODE_CGVIEW:  compose_cgview();  compose_toast(); return;
     case MODE_FLOW:    compose_flow();    compose_toast(); return;
+    case MODE_CHSEL:   compose_chsel();   compose_toast(); return;
     case MODE_SETTINGS: compose_settings(); compose_toast(); return;
     case MODE_SAVELOAD: compose_saveload(); compose_toast(); return;
     default:           break;

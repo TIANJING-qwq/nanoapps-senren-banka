@@ -41,12 +41,19 @@ for f in [src / "script.bin"] + sorted((src / "ch").glob("*.bin")):
             for _ in range(2):
                 s, pc = rd_str(b, pc)
                 chars |= set(s)
+        elif op == 7:
+            cnt = b[pc]; pc += 1
+            for _ in range(cnt):
+                pc += 4
+                _, pc = rd_str(b, pc)
         elif op == 8:
             pc += 4
         elif op == 9:
             pc += 2
         elif op == 10:
             pc += 2
+        elif op == 11:
+            s, pc = rd_str(b, pc)
         else:
             print(f"op {op} at {pc - 1} in {f.name}"); sys.exit(1)
 chars |= set((src / "chapters.tsv").read_text(encoding="utf-8"))
@@ -61,6 +68,7 @@ print(f"font.bin {len(blob):,} B")
 # 2) scripts + flow
 (out / "script.bin").write_bytes((src / "script.bin").read_bytes())
 (out / "flow.idx").write_bytes((src / "flow.idx").read_bytes())
+(out / "chsel.idx").write_bytes((src / "chsel.idx").read_bytes())
 (out / "ch").mkdir(exist_ok=True)
 for f in (src / "ch").glob("*.bin"):
     (out / "ch" / f.name).write_bytes(f.read_bytes())

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """build_galpack.py — host-side GalPack builder for the NanoApps vn player.
 
 The on-device half is apps/vn/vn.c (RAW_SURFACE app). This tool converts a
@@ -41,7 +41,7 @@ Outputs (copy the CONTENTS of the out dir into /Data/vn/ on the iPod):
   pack-info.txt
 
 Limits enforced to match the engine (see apps/vn/vn.c caps):
-  script <= 384 KiB, font <= 3000 glyphs <= 24 px, bg 432x240 landscape,
+  script <= 384 KiB, font <= 3400 glyphs <= 24 px, bg 432x240 landscape,
   sprites <= 160x220, CG thumbnails 84x48, names <= 63 bytes,
   one line <= ~740 bytes.
 Long lines are auto-split into consecutive SAY ops at char boundaries.
@@ -79,7 +79,7 @@ SPR_W, SPR_H = 160, 220
 THUMB_W, THUMB_H = 84, 48
 CG_MAX, FLOW_MAX = 512, 256
 SCRIPT_MAX = 384 * 1024
-GLYPH_MAX = 3000
+GLYPH_MAX = 3400
 GLYPH_SIZE_MAX = 24
 NAME_MAX = 63
 TEXT_MAX = 740            # bytes of UTF-8 per SAY (auto-split above this)
