@@ -1143,6 +1143,12 @@ static void step(void)
                 xmemcpy(path, DIR_BASE "/bgm/", 14);
                 xmemcpy(path + 14, name, dl + 1);
                 xmemcpy(path + 14 + dl, ".WAV", 5);   /* FS is case-sensitive */
+                if (!hb_fs_size(path) && 14u + dl + 5u < sizeof path) {
+                    /* our bgm files shipped lowercase: try .wav too */
+                    xmemcpy(path + 14 + dl, ".wav", 5);
+                    if (!hb_fs_size(path))
+                        xmemcpy(path + 14 + dl, ".WAV", 5);
+                }
                 if (hb_fs_size(path)) s_bgm_play++;
                 else if (s_bgm_miss < 9999) s_bgm_miss++;
                 s_bgm_vol = volmap[s_set_volume];
