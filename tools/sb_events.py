@@ -10,7 +10,15 @@ Output NanoApps/build/sb_events.tsv:
   base \t C \t <char> \t <stand file>
   base \t S \t <speaker> \t <text> \t <voice>
 """
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+try:
+    from voice83 import short_of          # long voice name -> 8.3 short name
+except Exception:
+    def short_of(v):
+        return ""
 
 SCN = Path("K:/千恋＊万花/outPath/data.xp3/scn")
 OUT = Path("NanoApps/build/sb_events.tsv")
@@ -101,6 +109,10 @@ for f in sorted(SCN.glob("*.psb.tjs")):
             if w > v:
                 voice = s[v + 12:w]
         if tx.strip():
+            if voice:
+                s8 = short_of(voice)          # FAT32 8.3 short name
+                if s8:
+                    voice = s8[:-4]           # engine appends ".wav"
             ev.append((i, ("S", sp, tx, voice)))
         p = i + 5
 
