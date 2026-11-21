@@ -58,7 +58,10 @@ for f in sorted(SCN.glob("*.psb.tjs")):
         if cls == "stage":
             ev.append((pos, ("B", fname)))
         elif cls == "character":
-            ev.append((pos, ("C", last_name[1], fname)))
+            # the "name" here is the LAYER (ch_effect / ch_effect0..), not the
+            # character — the character is the stand file's stem (芳乃.stand)
+            ch = fname.split(".")[0] if "." in fname else fname
+            ev.append((pos, ("C", ch, fname)))
 
     # dialogue blocks: a line that is just `"<sp>",` followed by a line
     # `void,` followed by `"<tx>",`  (object fields use `"k" => void,`)
