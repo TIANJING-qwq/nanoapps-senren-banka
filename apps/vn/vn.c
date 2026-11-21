@@ -1213,23 +1213,11 @@ static void step(void)
                     s_voice_ticks = ms / VOICE_TICK_MS + 1u;
                 }
                 s_voice_t0 = s_ticks;
-                if (s_voice_ticks) {
-                    /* play IMMEDIATELY (same call shape as the title-screen
-                       test that was audible), then yield to the audio
-                       pthread. The queue + next-frame flush produced no
-                       sound in-scene. */
-                    uint32_t q = xstrlen(path), off = 0, w = 0;
-                    s_dbg_fs = (uint8_t)(hb_fs_size(path) != 0);
-                    s_dbg_ret = (uint8_t)hb_audio_play_wav_main(path, 0x7FFFu);
-                    s_dbg_calls++;
-                    if (q > 20u) off = q - 20u;
-                    while (path[off] && w < sizeof s_dbg_snd - 1u)
-                        s_dbg_snd[w++] = path[off++];
-                    s_dbg_snd[w] = 0;
-                    s_pending_kind = 0;   /* cancel a queued bgm */
-                    s_bgm_t0 = s_ticks;   /* keep bgm loop from restarting */
-                    hb_display_wait_vsync();
-                }
+                if (s_voice_ticks)
+                    /* queue it: plays at the next frame start, OUTSIDE the
+                       touch-event context, which is exactly the shape that
+                       was proven audible on the title screen. */
+                    queue_sound(path, 0x7FFFu, 2);
             }
             break;
         }
@@ -2233,6 +2221,7 @@ void hb_raw_frame(const hb_spoint_t *touch)
      * every path (previous version only yielded on the dialogue path). */
     if (s_pending_kind) {
         uint32_t i = 0, n = xstrlen(s_pending_snd);
+        s_dbg_fs = (uint8_t)(hb_fs_size(s_pending_snd) != 0);
         s_dbg_ret = (uint8_t)hb_audio_play_wav_main(s_pending_snd, s_pending_vol);
         if (s_dbg_calls < 9999) s_dbg_calls++;
         /* keep the tail of the path (file name is what matters) */
