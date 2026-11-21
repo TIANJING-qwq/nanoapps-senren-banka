@@ -224,10 +224,6 @@ static uint16_t s_dbg_calls;             /* how many play calls happened  */
 static uint32_t s_audio_until;           /* s_ticks when the clip ends    */
 static uint16_t s_pending_ticks;         /* length of the queued clip     */
 
-static int audio_busy(void)
-{
-    return (int32_t)(s_audio_until - s_ticks) > 0;
-}
 static uint8_t  s_dbg_fs;                /* file existed when attempted   */
 
 static void queue_sound(const char *path, uint16_t vol, uint8_t kind,
@@ -249,6 +245,11 @@ static uint16_t s_auto_ticks;
 static uint8_t  s_mode;
 static uint8_t  s_ret_mode;              /* where IG-menu/settings return  */
 static uint32_t s_ticks;
+
+static int audio_busy(void)
+{
+    return (int32_t)(s_audio_until - s_ticks) > 0;
+}
 static uint16_t s_wait;
 static uint8_t  s_prev_down;
 static uint8_t  s_prev_ffwd;
