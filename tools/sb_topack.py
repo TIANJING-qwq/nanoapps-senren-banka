@@ -116,13 +116,15 @@ def s_str(b):
 
 
 def route_group(base, ci):
-    """0 共通 / 1 芳乃 / 2 茉子 / 3 丛雨 / 4 レナ / 5 小春・芦花 / 6 后日谈.
-    Chapter numbers: 0xx common, 1xx Yoshino, 2xx Makoto, 3xx Murasame,
-    4xx Rena, 5xx Koharu&Roka; a title with 'after' marks an epilogue."""
+    """0 共通 / 1 芳乃 / 2 茉子 / 3 丛雨 / 4 蕾娜 / 5 小春 / 6 芦花.
+    Authoritative file->group from sb_scenemap.tsv (built from the game's
+    own scenelist.psb.tjs); falls back to numeric prefix if absent."""
+    g = SCENEMAP.get(stem_key(base), (None, None))[1]
+    if g:
+        return {"common": 0, "yoshino": 1, "mako": 2, "murasame": 3,
+                "rena": 4, "koharu": 5, "roka": 6}[g]
     m = re.match(r"^(\d+)", base)
     no = int(m.group(1)) if m else ci
-    if re.search(r"ａｆｔｅｒ|after", base, re.I):
-        return 6
     if no < 100:
         return 0
     if no < 200:
@@ -134,6 +136,25 @@ def route_group(base, ci):
     if no < 500:
         return 4
     return 5
+
+
+def stem_key(base):
+    """Normalize a chapter base name to the scenemap key (e.g.
+    '414レナ・イザナウver1.00' -> '414レナ', '508b・...' -> '508b')."""
+    m = re.match(r"(\d+[ab]?)(レナ)?", base)
+    if not m:
+        return base.split("・")[0]
+    return m.group(1) + (m.group(2) or "")
+
+
+# scenemap: key -> (order, group, display title) from the game's own list
+SCENEMAP = {}
+sm_path = Path("NanoApps/build/sb_scenemap.tsv")
+if sm_path.exists():
+    for ln in sm_path.read_text(encoding="utf-8").splitlines():
+        p = ln.split("\t")
+        if len(p) == 4:
+            SCENEMAP[p[0]] = (int(p[1]), p[2], p[3])
 
 
 def build(ci, ks, lines, next_no):
@@ -176,8 +197,13 @@ def build(ci, ks, lines, next_no):
 idx_lines = []
 flows = []
 chsels = []
+# order chapters by the game's own scenelist sequence (first appearance),
+# falling back to name sort for anything the scenelist doesn't cover
+order.sort(key=lambda b: (SCENEMAP.get(stem_key(b), (9999,))[0], b))
 for ci, ks in enumerate(order):
-    next_no = ci + 1 if ci + 1 < len(order) else None
+    g_cur = route_group(ks, ci)
+    g_next = route_group(order[ci + 1], ci + 1) if ci + 1 < len(order) else -1
+    next_no = ci + 1 if ci + 1 < len(order) and g_cur == g_next else None
     blob = build(ci, ks, chapters[ks], next_no)
     safe = f"{ci:04d}"
     no = ci + 1
@@ -186,10 +212,14 @@ for ci, ks in enumerate(order):
     else:
         (outdir / "ch").mkdir(exist_ok=True)
         (outdir / f"ch/{ci:04d}.bin").write_bytes(blob)
-    # chapter title: strip ver suffix and numeric prefix
-    title = ks.rsplit("ver", 1)[0].rstrip("・").lstrip("0123456789")
+    # title: original chapter number + name from the scenelist
+    sm = SCENEMAP.get(stem_key(ks))
+    if sm and sm[2]:
+        title = sm[2]
+    else:
+        title = ks.rsplit("ver", 1)[0].rstrip("・").lstrip("0123456789")
     flows.append(f"{ci}\t{title}")
-    chsels.append((route_group(ks, ci), ci, title))
+    chsels.append((g_cur, ci, title))
     idx_lines.append(f"{ks}\t{safe}\t{len(chapters[ks])}\t{len(blob)}")
 
 (outdir / "chapters.tsv").write_text("\n".join(idx_lines), encoding="utf-8")

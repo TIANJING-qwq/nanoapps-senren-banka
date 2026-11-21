@@ -1788,16 +1788,16 @@ static void flow_hit(int lx, int ly)
 /* ------------------------------------------------------- chapter select --- */
 
 /* chsel.idx: "VNCS" u16 ver(1) u16 n, then n x (u8 group, u16 chapter,
-   u16 nlen, name[]). group: 0 共通 1 芳乃 2 茉子 3 丛雨 4 レナ 5 小春
-   6 后日谈 */
+   u16 nlen, name[]). group: 0 共通 1 芳乃 2 茉子 3 丛雨 4 蕾娜 5 小春
+   6 芦花 — matches the original game's route structure (scenelist) */
 static const char *const CHSEL_GROUP_CJK[CHSEL_GROUP_N] = {
     "\xE5\x85\xB1\xE9\x80\x9A\xE7\xBA\xBF",                    /* 共通线 */
     "\xE8\x8A\xB3\xE4\xB9\x83\xE7\xBA\xBF",                    /* 芳乃线 */
     "\xE8\x8C\x89\xE5\xAD\x90\xE7\xBA\xBF",                    /* 茉子线 */
     "\xE4\xB8\x9B\xE9\x9B\xA8\xE7\xBA\xBF",                    /* 丛雨线 */
     "\xE8\x95\xBE\xE5\xA8\x9C\xE7\xBA\xBF",                    /* 蕾娜线 */
-    "\xE5\xB0\x8F\xE6\x98\xA5\xE3\x83\xBB\xE8\x8A\xA6\xE8\x8A\xB1\xE7\xBA\xBF", /* 小春・芦花线 */
-    "\xE5\x90\x8E\xE6\x97\xA5\xE8\xB0\x88",                    /* 后日谈 */
+    "\xE5\xB0\x8F\xE6\x98\xA5\xE7\xBA\xBF",                    /* 小春线 */
+    "\xE8\x8A\xA6\xE8\x8A\xB1\xE7\xBA\xBF",                    /* 芦花线 */
 };
 
 static void load_chsel(void)
