@@ -1,0 +1,10 @@
+{
+  "bg_tags": ["bg", "background", "back", "bcross", "wcross"],
+  "fg_tags": ["fg", "fgimage", "chara", "character", "stand", "sp"],
+  "bgm_tags": ["playbgm", "bgm", "music"],
+  "end_tags": ["s"],
+  "choice_tag": "gal_choice",
+  "name_patterns": ["^【(.+?)】"],
+  "default_sprite_pos": "center",
+  "image_layer0_is_bg": true
+}

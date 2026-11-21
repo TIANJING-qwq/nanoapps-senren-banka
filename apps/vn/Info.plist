@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>	<string>org.nanoapps.vn</string>
+	<key>CFBundleName</key>		<string>千恋万花</string>
+	<key>CFBundleExecutable</key>	<string>vn</string>
+	<key>HBAppKind</key>			<integer>1</integer>
+	<key>HBIconGlyph</key>			<string>book-open</string>
+	<key>HBIconColor</key>			<string>#ff6b9d</string>
+</dict>
+</plist>
