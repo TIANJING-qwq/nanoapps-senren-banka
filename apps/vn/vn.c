@@ -218,10 +218,22 @@ static uint8_t  s_pending_kind;          /* 0 none, 1 bgm, 2 voice        */
 static char     s_dbg_snd[40];           /* last attempted sound (tail)   */
 static uint8_t  s_dbg_ret;               /* its play() return value       */
 static uint16_t s_dbg_calls;             /* how many play calls happened  */
+/* The iPod audio API owns ONE static descriptor and is single-shot: calling
+ * it again before the previous clip finished overlaps/crashes (device
+ * reboot). Everything goes through this mutex. */
+static uint32_t s_audio_until;           /* s_ticks when the clip ends    */
+static uint16_t s_pending_ticks;         /* length of the queued clip     */
+
+static int audio_busy(void)
+{
+    return (int32_t)(s_audio_until - s_ticks) > 0;
+}
 static uint8_t  s_dbg_fs;                /* file existed when attempted   */
 
-static void queue_sound(const char *path, uint16_t vol, uint8_t kind)
+static void queue_sound(const char *path, uint16_t vol, uint8_t kind,
+                        uint16_t ticks)
 {
+    s_pending_ticks = ticks;
     uint32_t i = 0;
     while (path[i] && i < sizeof s_pending_snd - 1u) {
         s_pending_snd[i] = path[i];
@@ -1154,12 +1166,7 @@ static void step(void)
                 if (hb_fs_size(path)) s_bgm_play++;
                 else if (s_bgm_miss < 9999) s_bgm_miss++;
                 s_bgm_vol = volmap[s_set_volume];
-                /* queue it: the audio API has ONE static descriptor, so a bgm
-                   call right next to the voice call would clobber it and both
-                   would stay silent. The frame-start flush plays it. */
-                queue_sound(path, s_bgm_vol, 1);
-                /* the audio API is single-shot: remember the length so the
-                   loop tail can restart it (BGM must not stop) */
+                /* length first (used as the audio-mutex hold time) */
                 {
                     uint8_t wh[44];
                     uint32_t rate, dsize, ms = 0;
@@ -1173,6 +1180,10 @@ static void step(void)
                     s_bgm_ticks = ms ? ms / VOICE_TICK_MS : 0u;
                     s_bgm_t0 = s_ticks;
                 }
+                /* queue it: the API has ONE static descriptor, so a bgm call
+                   next to the voice call would clobber it. Frame-start flush
+                   plays it, gated by the mutex. */
+                queue_sound(path, s_bgm_vol, 1, (uint16_t)s_bgm_ticks);
                 xmemcpy(s_last_bgm, name, dl + 1);            }
             break;
         }
@@ -1217,11 +1228,12 @@ static void step(void)
                     s_voice_ticks = ms / VOICE_TICK_MS + 1u;
                 }
                 s_voice_t0 = s_ticks;
-                if (s_voice_ticks)
+                if (s_voice_ticks && !audio_busy())
                     /* queue it: plays at the next frame start, OUTSIDE the
-                       touch-event context, which is exactly the shape that
-                       was proven audible on the title screen. */
-                    queue_sound(path, 0x7FFFu, 2);
+                       touch-event context. Skipped while another clip is
+                       still playing (the API is single-shot; overlapping
+                       calls crash the device). */
+                    queue_sound(path, 0x7FFFu, 2, (uint16_t)s_voice_ticks);
             }
             break;
         }
@@ -2225,8 +2237,15 @@ void hb_raw_frame(const hb_spoint_t *touch)
      * every path (previous version only yielded on the dialogue path). */
     if (s_pending_kind) {
         uint32_t i = 0, n = xstrlen(s_pending_snd);
+        if (audio_busy()) {                 /* still playing: drop it */
+            s_pending_kind = 0;
+            s_pending_snd[0] = 0;
+        }
         s_dbg_fs = (uint8_t)(hb_fs_size(s_pending_snd) != 0);
-        s_dbg_ret = (uint8_t)hb_audio_play_wav_main(s_pending_snd, s_pending_vol);
+        s_dbg_ret = s_pending_kind ?
+            (uint8_t)hb_audio_play_wav_main(s_pending_snd, s_pending_vol) : 0;
+        if (s_pending_kind)
+            s_audio_until = s_ticks + (s_pending_ticks ? s_pending_ticks : 30u);
         if (s_dbg_calls < 9999) s_dbg_calls++;
         /* keep the tail of the path (file name is what matters) */
         if (n > 20u) i = n - 20u;
@@ -2242,19 +2261,19 @@ void hb_raw_frame(const hb_spoint_t *touch)
     }
     /* BGM loop: the API is single-shot, so restart when the track ends
        (only while in-scene and a track is loaded). */
-    if (0 && s_bgm_ticks && s_mode == MODE_SCENE &&
+    if (s_bgm_ticks && !audio_busy() && s_mode == MODE_SCENE &&
         s_ticks - s_bgm_t0 >= s_bgm_ticks) {
         char bp[96];
         uint32_t dl = xstrlen(s_last_bgm);
-        if (dl && 14u + dl + 5u < sizeof bp) {
+        if (dl && 13u + dl + 5u < sizeof bp) {
             xmemcpy(bp, DIR_BASE "/bgm/", 13);
             xmemcpy(bp + 13, s_last_bgm, dl + 1);
             xmemcpy(bp + 13 + dl, ".WAV", 5);
-            queue_sound(bp, s_bgm_vol, 1);
-            s_bgm_t0 = s_ticks;
-            hb_audio_play_wav_main(s_pending_snd, s_pending_vol);
-            s_pending_kind = 0;
-            hb_display_wait_vsync();
+            if (hb_audio_play_wav_main(bp, s_bgm_vol)) {
+                s_audio_until = s_ticks + s_bgm_ticks;
+                s_bgm_t0 = s_ticks;
+                hb_display_wait_vsync();
+            }
         }
     }
 
