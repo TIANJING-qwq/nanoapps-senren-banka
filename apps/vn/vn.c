@@ -204,8 +204,9 @@ static uint8_t  s_prev_ffwd;
 static uint8_t  s_prev_back;
 static uint8_t  s_skip;                  /* skip-to-choice fast-forward   */
 static char     s_last_bgm[SAVENAME_MAX];
-static uint32_t s_voice_ms;    /* current line's voice duration, 0 = none */
-static uint32_t s_voice_t0;    /* tick when it started */
+static uint32_t s_voice_ticks;  /* voice window length in frames (~33ms) */
+static uint32_t s_voice_t0;     /* frame counter when it started       */
+#define VOICE_TICK_MS 33u       /* one s_ticks frame ≈ 33 ms            */
 static uint32_t s_err;
 static uint8_t  s_save_valid;
 static uint32_t s_save_off;
@@ -1083,9 +1084,9 @@ static void step(void)
             char name[SAVENAME_MAX], path[96];
             uint32_t dl;
             rd_str(name, (uint16_t)sizeof name);
-            s_voice_ms = 0;
+            s_voice_ticks = 0;
             if (!name[0]) break;
-            if (s_ticks - s_voice_t0 < s_voice_ms)
+            if (s_ticks - s_voice_t0 < s_voice_ticks)
                 break;                       /* previous clip still active */
             dl = xstrlen(name);
             if (14u + dl + 5u < sizeof path) {
@@ -1100,11 +1101,12 @@ static void step(void)
                 dsize = got == 44 ? (uint32_t)wh[40] | ((uint32_t)wh[41] << 8)
                     | ((uint32_t)wh[42] << 16) | ((uint32_t)wh[43] << 24) : 0;
                 if (rate) {
-                    s_voice_ms = dsize / (rate / 1000u + 1u);
-                    if (s_voice_ms > 60000u) s_voice_ms = 60000u;
+                    uint32_t ms = dsize / (rate / 1000u + 1u);
+                    if (ms > 60000u) ms = 60000u;
+                    s_voice_ticks = ms / VOICE_TICK_MS + 1u;
                 }
                 s_voice_t0 = s_ticks;
-                if (s_voice_ms)
+                if (s_voice_ticks)
                     hb_audio_play_wav_main(path, 0x7FFFu);
             }
             break;
@@ -1262,10 +1264,10 @@ static void compose_textbox(void)
     if (s_have_name && s_font_w)
         draw_nameplate(s_say_name);
     /* voice progress bar: small strip along the textbox bottom (原版风) */
-    if (s_voice_ms) {
+    if (s_voice_ticks) {
         uint32_t el = s_ticks - s_voice_t0;
-        uint32_t frac = el >= s_voice_ms ? 8 : (uint32_t)((uint64_t)el * 8u
-                                                          / s_voice_ms);
+        uint32_t frac = el >= s_voice_ticks ? 8 :
+            el * 8u / s_voice_ticks;
         int bw = (BOX_W - 24) / 8 * (int)frac;
         lfill_rect(BOX_X + 12, BOX_Y + BOX_H - 5, BOX_W - 24, 2, 0x2A2D3Au);
         if (bw > 0)
