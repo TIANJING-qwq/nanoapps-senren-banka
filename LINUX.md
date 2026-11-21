@@ -55,22 +55,38 @@ cd ~/NanoApps
 编译全部系统+应用。**vn 编译通过 = 引擎代码没有编译错误**。
 有任何报错把完整输出复制给我。
 
-## 五、安装到 iPod
+## 五、安装到 iPod（两种方式）
+
+### 方式 A：直接拷贝（简单，推荐先试这个）
+
+`./start build vn` 之后，构建产物在 `apps/vn/build/`（或 build 输出
+目录）里是一个 `.nanoapp` 文件夹（含 `.hbapp` + `Info.plist`）。
+**iPod 处于磁盘模式**（或用 `./start remount` 挂载），把整个
+`.nanoapp` 文件夹拷到 iPod 磁盘的 **`/Apps/`** 下即可：
+
+```bash
+cp -r apps/vn/build/*.nanoapp /Volumes/NANO/Apps/
+```
+
+数据包同样拷 `/Data/vn/`（见下）。
+
+### 方式 B：SCSI 传输（自动化）
 
 1. iPod 插宿主机 → USB 直通到虚拟机 → 在 iPod 上保持
-   **Home 主屏**（不要进"已连接"磁盘模式）
+   **Home 主屏**状态（不要进"已连接"磁盘模式）
 2. ```bash
    ./start install vn
    ```
    这会走 SCSI 传输层安装应用（工具会自动装齐设备侧依赖）。
-3. 应用装完后，**数据包**拷贝（iPod 磁盘此时可挂载）：
-   ```bash
-   # 把 sb_full 内容拷入 iPod 的 /Data/vn/
-   ./start remount        # 让 iPod 磁盘可写（或按提示挂载）
-   cp -r build/sb_full/* /Volumes/NANO/Data/vn/   # 挂载点按实际
-   ./start eject
-   ```
-   （数据包也可以拔下来回 Windows 宿主机拷，效果一样）
+
+### 数据包（两种方式都要）
+
+```bash
+./start remount
+cp -r build/sb_full/* /Volumes/NANO/Data/vn/   # 挂载点按实际
+./start eject
+```
+（数据包也可以拔下来回 Windows 宿主机拷，效果一样）
 
 ## 六、常见问题
 
