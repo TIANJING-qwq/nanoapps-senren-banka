@@ -30,13 +30,16 @@ jobs:
             gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi \
             make
           python -m pip install Pillow pyelftools
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - name: Build the vn app (.hbapp)
         run: |
           chmod +x start
           ./start build vn
       - name: Package .nanoapp folder
         run: |
-          SKIP_SCREENS=1 python tools/build_apps.py vn
+          python tools/build_apps.py vn
           ls -R /tmp/hbapps/Apps
           cd /tmp/hbapps && zip -r "$GITHUB_WORKSPACE/vn-nanoapp.zip" Apps
       - uses: actions/upload-artifact@v4
