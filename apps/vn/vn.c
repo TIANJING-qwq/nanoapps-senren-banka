@@ -218,6 +218,7 @@ static uint8_t  s_pending_kind;          /* 0 none, 1 bgm, 2 voice        */
 static char     s_dbg_snd[40];           /* last attempted sound (tail)   */
 static uint8_t  s_dbg_ret;               /* its play() return value       */
 static uint16_t s_dbg_calls;             /* how many play calls happened  */
+static uint8_t  s_dbg_fs;                /* file existed when attempted   */
 
 static void queue_sound(const char *path, uint16_t vol, uint8_t kind)
 {
@@ -1220,6 +1221,7 @@ static void step(void)
                        pthread. The queue + next-frame flush produced no
                        sound in-scene. */
                     uint32_t q = xstrlen(path), off = 0, w = 0;
+                    s_dbg_fs = (uint8_t)(hb_fs_size(path) != 0);
                     s_dbg_ret = (uint8_t)hb_audio_play_wav_main(path, 0x7FFFu);
                     s_dbg_calls++;
                     if (q > 20u) off = q - 20u;
@@ -2436,6 +2438,23 @@ void hb_raw_frame(const hb_spoint_t *touch)
     }
     compose_textbox();
     compose_text();
+    /* audio debug (temporary): ret / file-existed / last file */
+    {
+        char d[52];
+        int k = 0, j = 0;
+        const char *p1 = "SD:";
+        while (*p1) d[k++] = *p1++;
+        d[k++] = (char)('0' + (s_dbg_ret ? 1 : 0));
+        d[k++] = (char)('0' + (s_dbg_fs ? 1 : 0));
+        d[k++] = ' ';
+        d[k++] = (char)('0' + (s_dbg_calls / 100) % 10);
+        d[k++] = (char)('0' + (s_dbg_calls / 10) % 10);
+        d[k++] = (char)('0' + s_dbg_calls % 10);
+        d[k++] = ' ';
+        while (s_dbg_snd[j] && k < 48) d[k++] = s_dbg_snd[j++];
+        d[k] = 0;
+        draw_ascii8(6, 112, d, 1, 0xFFD166u);
+    }
     /* in-game menu affordance */
     lfill_rect(SCR_W - 34, 6, 28, 20, 0x1D3557u);
     draw_ascii8(SCR_W - 30, 10, "MENU", 1, 0xF1FAEEu);
