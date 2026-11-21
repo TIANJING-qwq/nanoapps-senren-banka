@@ -1679,6 +1679,31 @@ static void saveload_hit(int lx, int ly)
 #define CG_ROWS 2
 #define CG_PAGE (CG_COLS * CG_ROWS)
 
+static uint16_t s_thumb_cache[CG_PAGE][THUMB_PX];  /* decoded page thumbs   */
+static uint8_t  s_thumb_key[CG_PAGE];              /* valid flag per cell   */
+static int16_t  s_thumb_page = -1;                 /* which page is cached  */
+static int16_t  s_cg_cache = -1;                   /* cgview: loaded index  */
+
+static void gallery_cache_page(void)
+{
+    int i;
+    if (s_thumb_page == (int16_t)s_cg_page) return;
+    s_thumb_page = (int16_t)s_cg_page;
+    for (i = 0; i < CG_PAGE; i++)
+        s_thumb_key[i] = 0;
+    for (i = 0; i < CG_PAGE; i++) {
+        uint16_t idx = (uint16_t)(s_cg_page * CG_PAGE + i);
+        uint16_t w = 0, h = 0;
+        if (idx >= s_cg_n) break;
+        if (!cg_is_seen(idx)) continue;
+        if (load_asset("cgt", s_cg_name[idx], THUMB_W, THUMB_H, 0,
+                       s_thumb, 0, &w, &h) && w == THUMB_W && h == THUMB_H) {
+            xmemcpy(s_thumb_cache[i], s_thumb, (uint32_t)THUMB_PX * 2u);
+            s_thumb_key[i] = 1;
+        }
+    }
+}
+
 static void compose_gallery(void)
 {
     int i;
@@ -1688,6 +1713,7 @@ static void compose_gallery(void)
         draw_str("CG\xE9\x89\xB4\xE8\xB5\x8F", 12, 6, 0xF1FAEEu);
     else
         draw_ascii8(12, 8, "CG MODE", 2, 0xF1FAEEu);
+    gallery_cache_page();                     /* disk reads only on page flip */
     for (i = 0; i < CG_PAGE; i++) {
         uint16_t idx = (uint16_t)(s_cg_page * CG_PAGE + i);
         int gx = 14 + (i % CG_COLS) * (THUMB_W + 16);
@@ -1695,14 +1721,13 @@ static void compose_gallery(void)
         if (idx >= s_cg_n) break;
         lfill_rect(gx, gy, THUMB_W, THUMB_H, 0x1D3557u);
         if (cg_is_seen(idx)) {
-            uint16_t w = 0, h = 0;
-            if (load_asset("cgt", s_cg_name[idx], THUMB_W, THUMB_H, 0,
-                           s_thumb, 0, &w, &h) && w == THUMB_W && h == THUMB_H) {
+            if (s_thumb_key[i]) {
                 int x, y;
                 for (y = 0; y < THUMB_H; y++)
                     for (x = 0; x < THUMB_W; x++)
                         lpx(gx + x, gy + y)[0] =
-                            0xFF000000u | rgb565_x(s_thumb[(long)y * THUMB_W + x]);
+                            0xFF000000u |
+                            rgb565_x(s_thumb_cache[i][(long)y * THUMB_W + x]);
             }
             lrect_outline(gx, gy, THUMB_W, THUMB_H, 1, 0x457B9Du);
         } else {
@@ -1750,8 +1775,13 @@ static void gallery_hit(int lx, int ly)
 static void compose_cgview(void)
 {
     uint16_t w = 0, h = 0;
-    if (load_asset("cg", s_cg_name[s_cg_view], BG_W, BG_H, 0, s_bg, 0, &w, &h) &&
-        w == BG_W && h == BG_H)
+    if (s_cg_cache != (int16_t)s_cg_view) {   /* load only when the CG changes */
+        s_cg_cache = -1;
+        if (load_asset("cg", s_cg_name[s_cg_view], BG_W, BG_H, 0, s_bg, 0,
+                       &w, &h) && w == BG_W && h == BG_H)
+            s_cg_cache = (int16_t)s_cg_view;  /* s_bg now holds this CG */
+    }
+    if (s_cg_cache == (int16_t)s_cg_view)
         compose_bg_from(s_bg);
     else
         lfill_rect(0, 0, SCR_W, SCR_H, 0x101018u);

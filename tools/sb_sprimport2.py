@@ -17,6 +17,19 @@ W, H = 160, 220
 
 def pack_spr(img: Image.Image) -> bytes:
     im = img.convert("RGBA")
+    # The KrkrExtract PNGs lost the alpha channel — the stand background is
+    # solid black. Key near-black out with a soft edge so sprites over
+    # backgrounds don't show the black box.
+    if im.getextrema()[3][0] == 255:            # fully opaque -> key black
+        px = im.load()
+        for y in range(im.height):
+            for x in range(im.width):
+                r, g, b, _ = px[x, y]
+                lum = max(r, g, b)
+                if lum < 20:
+                    px[x, y] = (0, 0, 0, 0)
+                elif lum < 44:                  # soft edge
+                    px[x, y] = (r, g, b, int(255 * (lum - 20) / 24))
     # fit inside 160x220 keeping aspect, bottom-aligned (VN style)
     sc = min(W / im.width, H / im.height)
     nw, nh = max(1, round(im.width * sc)), max(1, round(im.height * sc))
