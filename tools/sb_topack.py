@@ -73,7 +73,9 @@ if bgm_path.exists():
         if "\t" in ln:
             b, g = ln.split("\t", 1)
             bgm_of[b] = g
-tjs_path = Path("NanoApps/build/sb_tjs.tsv")
+tjs_path = Path("NanoApps/build/sb_tjs83.tsv")   # 8.3 short voice names
+if not tjs_path.exists():
+    tjs_path = Path("NanoApps/build/sb_tjs.tsv")
 if tjs_path.exists():
     for ln in tjs_path.read_text(encoding="utf-8").splitlines():
         parts = ln.split("\t")
