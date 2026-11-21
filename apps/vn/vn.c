@@ -128,6 +128,8 @@ static uint8_t  s_font_w, s_font_h;
 static uint16_t s_font_n;
 static uint32_t s_font_cp[FONT_GLYPH_MAX];
 static uint32_t s_font_off[FONT_GLYPH_MAX];
+static uint32_t s_font_got;                    /* bytes read (self-test)  */
+static uint32_t s_font_xor;                    /* sample checksum         */
 
 /* script.bin: "VNPK" u32 ver u32 nlabels, u32 table[], opcode stream */
 static uint8_t  s_script[SCRIPT_MAX];
@@ -564,6 +566,16 @@ static void load_font(void)
 
     bpr = ((uint32_t)s_font_w + 7u) >> 3;
     off = 10;
+    s_font_got = got;
+    s_font_xor = 0;
+    {   /* sample checksum: every 97th byte (coprime stride) */
+        uint32_t k;
+        for (k = 0; k + 4u <= got; k += 97u)
+            s_font_xor ^= (uint32_t)s_font_file[k] |
+                          ((uint32_t)s_font_file[k + 1u] << 8) |
+                          ((uint32_t)s_font_file[k + 2u] << 16) |
+                          ((uint32_t)s_font_file[k + 3u] << 24);
+    }
     for (i = 0; i < s_font_n; i++) {
         if (off + 4u + (uint32_t)s_font_h * bpr > got) { s_font_w = 0; return; }
         s_font_cp[i] = (uint32_t)s_font_file[off] |
@@ -1371,6 +1383,33 @@ static void compose_title(void)
     if (!s_font_w) {
         int w = ascii8_w("SENREN*BANKA", 2);
         draw_ascii8((SCR_W - w) / 2, 196, "SENREN*BANKA", 2, 0xF1FAEEu);
+    }
+    /* ---- FONT SELF-TEST: F:<got-hex> X:<xor-hex> + engine-rendered sample.
+     * Compare got with the real font.bin size and xor with the local
+     * tools/font_sim.py value; "千恋万花" below must match the PC render. */
+    {
+        char b[40];
+        static const char hex[] = "0123456789ABCDEF";
+        int i = 0, k;
+        uint32_t v;
+        const char *t = "F:";
+        while (*t) b[i++] = *t++;
+        v = s_font_got;
+        for (k = 28; k >= 0; k -= 4)
+            b[i++] = hex[(v >> k) & 0xFu];
+        b[i++] = ' '; b[i++] = 'N'; b[i++] = ':';
+        v = s_font_w ? s_font_n : 0;
+        for (k = 12; k >= 0; k -= 4)
+            b[i++] = hex[(v >> k) & 0xFu];
+        b[i++] = ' '; b[i++] = 'X'; b[i++] = ':';
+        v = s_font_xor;
+        for (k = 28; k >= 0; k -= 4)
+            b[i++] = hex[(v >> k) & 0xFu];
+        b[i] = 0;
+        draw_ascii8(6, 2, b, 1, 0x6FCF97u);
+        if (s_font_w)
+            draw_str("\xE5\x8D\x83\xE6\x81\x8B\xE4\xB8\x87\xE8\x8A\xB1", /* 千恋万花 */
+                     6, 12, 0xFFD166u);
     }
 }
 
