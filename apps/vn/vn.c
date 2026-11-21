@@ -2245,8 +2245,12 @@ void hb_raw_frame(const hb_spoint_t *touch)
         s_dbg_fs = (uint8_t)(hb_fs_size(s_pending_snd) != 0);
         s_dbg_ret = s_pending_kind ?
             (uint8_t)hb_audio_play_wav_main(s_pending_snd, s_pending_vol) : 0;
-        if (s_pending_kind)
-            s_audio_until = s_ticks + (s_pending_ticks ? s_pending_ticks : 30u);
+        if (s_pending_kind) {
+            uint32_t hold = (uint32_t)(s_pending_ticks ? s_pending_ticks : 30u);
+            /* +50% + 2s safety: the audio pthread's loadFile start latency
+               is NOT covered by the clip's own duration */
+            s_audio_until = s_ticks + hold + hold / 2u + 60u;
+        }
         if (s_dbg_calls < 9999) s_dbg_calls++;
         /* keep the tail of the path (file name is what matters) */
         if (n > 20u) i = n - 20u;
@@ -2259,10 +2263,14 @@ void hb_raw_frame(const hb_spoint_t *touch)
         s_pending_kind = 0;
         s_pending_snd[0] = 0;
         hb_display_wait_vsync();
+        /* SDK: the OS audio stack needs real MIPI activity (a scale-3 text
+           draw) around playback or the device reboots. Keep it tiny and in
+           the corner so it is visually harmless, but genuinely scale-3. */
+        draw_ascii8(SCR_W - 26, SCR_H - 9, "..", 3, 0x000000u);
     }
     /* BGM loop: the API is single-shot, so restart when the track ends
        (only while in-scene and a track is loaded). */
-    if (s_bgm_ticks && !audio_busy() && s_mode == MODE_SCENE &&
+    if (0 && s_bgm_ticks && !audio_busy() && s_mode == MODE_SCENE &&
         s_ticks - s_bgm_t0 >= s_bgm_ticks) {
         char bp[96];
         uint32_t dl = xstrlen(s_last_bgm);
@@ -2271,7 +2279,8 @@ void hb_raw_frame(const hb_spoint_t *touch)
             xmemcpy(bp + 13, s_last_bgm, dl + 1);
             xmemcpy(bp + 13 + dl, ".WAV", 5);
             if (hb_audio_play_wav_main(bp, s_bgm_vol)) {
-                s_audio_until = s_ticks + s_bgm_ticks;
+                uint32_t hold = s_bgm_ticks;
+                s_audio_until = s_ticks + hold + hold / 2u + 60u;
                 s_bgm_t0 = s_ticks;
                 hb_display_wait_vsync();
             }
