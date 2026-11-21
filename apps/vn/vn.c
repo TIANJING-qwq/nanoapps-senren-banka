@@ -202,6 +202,7 @@ static uint16_t s_wait;
 static uint8_t  s_prev_down;
 static uint8_t  s_prev_ffwd;
 static uint8_t  s_prev_back;
+static int16_t  s_dbg_lx = -1, s_dbg_ly = -1;      /* touch debug readout */
 static uint8_t  s_skip;                  /* skip-to-choice fast-forward   */
 static char     s_last_bgm[SAVENAME_MAX];
 static uint32_t s_voice_ticks;  /* voice window length in frames (~33ms) */
@@ -501,7 +502,7 @@ static uint8_t load_asset(const char *dir, const char *name, uint16_t want_w,
     need = 9u + px * 2u + (fmt == 1u ? px : 0u);
     if (need > FONT_FILE_MAX) { rd_err(0xE5u); return 0; }
 
-    got = hb_fs_read(path, s_font_file, need);
+    got = hb_fs_read_chunked(path, s_font_file, need);
     if (got != need) return 0;
     if (color_out)
         for (i = 0; i < px; i++)
@@ -549,7 +550,7 @@ static void load_font(void)
 {
     uint32_t got, off, i, bpr;
     s_font_w = 0;
-    got = hb_fs_read(DIR_BASE "/font.bin", s_font_file, FONT_FILE_MAX);
+    got = hb_fs_read_chunked(DIR_BASE "/font.bin", s_font_file, FONT_FILE_MAX);
     if (got < 12 || s_font_file[0] != 'V' || s_font_file[1] != 'N' ||
         s_font_file[2] != 'F' || s_font_file[3] != 'N')
         return;
@@ -596,7 +597,7 @@ static uint8_t load_script_chapter(uint16_t chapter)
         path[20] = 0;
     }
     if (hb_fs_size(path) > SCRIPT_MAX) { rd_err(0xE9u); return 0; }
-    got = hb_fs_read(path, s_script, SCRIPT_MAX);
+    got = hb_fs_read_chunked(path, s_script, SCRIPT_MAX);
     if (got < 16 || s_script[0] != 'V' || s_script[1] != 'N' ||
         s_script[2] != 'P' || s_script[3] != 'K')
         return 0;
@@ -628,7 +629,7 @@ static void load_cgidx(void)
     uint32_t got, off, i;
     uint16_t n;
     s_cg_n = 0;
-    got = hb_fs_read(DIR_BASE "/cg.idx", s_cgidx_buf, sizeof s_cgidx_buf);
+    got = hb_fs_read_chunked(DIR_BASE "/cg.idx", s_cgidx_buf, sizeof s_cgidx_buf);
     if (got < 8 || s_cgidx_buf[0] != 'V' || s_cgidx_buf[1] != 'N' ||
         s_cgidx_buf[2] != 'C' || s_cgidx_buf[3] != 'G')
         return;
@@ -653,7 +654,7 @@ static void load_flowidx(void)
     uint32_t got, off, i;
     uint16_t n;
     s_flow_n = 0;
-    got = hb_fs_read(DIR_BASE "/flow.idx", s_flowidx_buf, sizeof s_flowidx_buf);
+    got = hb_fs_read_chunked(DIR_BASE "/flow.idx", s_flowidx_buf, sizeof s_flowidx_buf);
     if (got < 8 || s_flowidx_buf[0] != 'V' || s_flowidx_buf[1] != 'N' ||
         s_flowidx_buf[2] != 'F' || s_flowidx_buf[3] != 'L')
         return;
@@ -1766,7 +1767,7 @@ static void load_chsel(void)
     uint32_t got, off;
     uint16_t n, i;
     s_chsel_n = 0;
-    got = hb_fs_read(DIR_BASE "/chsel.idx", buf, sizeof buf);
+    got = hb_fs_read_chunked(DIR_BASE "/chsel.idx", buf, sizeof buf);
     if (got < 8 || buf[0] != 'V' || buf[1] != 'N' || buf[2] != 'C' ||
         buf[3] != 'S')
         return;
@@ -2002,6 +2003,25 @@ static void compose_toast(void)
     }
 }
 
+/* touch debug readout: bottom-right, always visible */
+static void compose_touchdbg(void)
+{
+    char b[24];
+    int i = 0, v;
+    const char *hex = "0123456789ABCDEF";
+    if (s_dbg_lx < 0) return;
+    b[i++] = 'T'; b[i++] = ':';
+    v = s_dbg_lx; if (v < 0) { b[i++] = '-'; v = -v; }
+    { int h = v / 100, t = (v / 10) % 10, o = v % 10;
+      b[i++] = h ? hex[h] : ' '; b[i++] = hex[t]; b[i++] = hex[o]; }
+    b[i++] = ',';
+    v = s_dbg_ly; if (v < 0) { b[i++] = '-'; v = -v; }
+    { int h = v / 100, t = (v / 10) % 10, o = v % 10;
+      b[i++] = h ? hex[h] : ' '; b[i++] = hex[t]; b[i++] = hex[o]; }
+    b[i] = 0;
+    draw_ascii8(SCR_W - 66, 2, b, 1, 0x6FCF97u);
+}
+
 void hb_raw_frame(const hb_spoint_t *touch)
 {
     uint8_t click, ffwd, back;
@@ -2011,6 +2031,10 @@ void hb_raw_frame(const hb_spoint_t *touch)
     if (touch) {                                   /* physical -> logical */
         lx = SCR_W - 1 - touch->y;                 /* CW grip: phys y grows left */
         ly = touch->x;                             /* logical y = phys x  */
+        if (touch->down) {
+            s_dbg_lx = (int16_t)lx;
+            s_dbg_ly = (int16_t)ly;
+        }
     }
     click = (uint8_t)(touch && touch->down && !s_prev_down);
     s_prev_down = touch ? (uint8_t)touch->down : 0;
@@ -2136,27 +2160,28 @@ void hb_raw_frame(const hb_spoint_t *touch)
     }
 
     switch (s_mode) {
-    case MODE_MISSING: compose_missing(); compose_toast(); return;
-    case MODE_ERROR:   compose_error();   compose_toast(); return;
-    case MODE_TITLE:   compose_title();   compose_toast(); return;
-    case MODE_GALLERY: compose_gallery(); compose_toast(); return;
-    case MODE_CGVIEW:  compose_cgview();  compose_toast(); return;
-    case MODE_FLOW:    compose_flow();    compose_toast(); return;
-    case MODE_CHSEL:   compose_chsel();   compose_toast(); return;
-    case MODE_SETTINGS: compose_settings(); compose_toast(); return;
-    case MODE_SAVELOAD: compose_saveload(); compose_toast(); return;
+    case MODE_MISSING: compose_missing(); compose_toast(); compose_touchdbg(); return;
+    case MODE_ERROR:   compose_error();   compose_toast(); compose_touchdbg(); return;
+    case MODE_TITLE:   compose_title();   compose_toast(); compose_touchdbg(); return;
+    case MODE_GALLERY: compose_gallery(); compose_toast(); compose_touchdbg(); return;
+    case MODE_CGVIEW:  compose_cgview();  compose_toast(); compose_touchdbg(); return;
+    case MODE_FLOW:    compose_flow();    compose_toast(); compose_touchdbg(); return;
+    case MODE_CHSEL:   compose_chsel();   compose_toast(); compose_touchdbg(); return;
+    case MODE_SETTINGS: compose_settings(); compose_toast(); compose_touchdbg(); return;
+    case MODE_SAVELOAD: compose_saveload(); compose_toast(); compose_touchdbg(); return;
     default:           break;
     }
 
-    if (s_mode == MODE_IGMENU) { compose_igmenu(); compose_toast(); return; }
+    if (s_mode == MODE_IGMENU) { compose_igmenu(); compose_toast(); compose_touchdbg(); return; }
 
     compose_bg();
     compose_sprites();
-    if (s_mode == MODE_CHOICE) { compose_choice(); compose_toast(); return; }
+    if (s_mode == MODE_CHOICE) { compose_choice(); compose_toast(); compose_touchdbg(); return; }
     if (s_mode == MODE_END) {
         int w = ascii8_w("- THE END -", 2);
         draw_ascii8((SCR_W - w) / 2, 110, "- THE END -", 2, 0xF1FAEEu);
         draw_arrow();
+        compose_touchdbg();
         return;
     }
     compose_textbox();
@@ -2166,4 +2191,5 @@ void hb_raw_frame(const hb_spoint_t *touch)
     draw_ascii8(SCR_W - 30, 10, "MENU", 1, 0xF1FAEEu);
     if (s_wait == 0 && s_reveal >= page_chars()) draw_arrow();
     compose_toast();
+    compose_touchdbg();
 }
