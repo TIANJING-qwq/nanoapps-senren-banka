@@ -6,9 +6,9 @@ The dumps are huge (some .psb.tjs are ~38 MB), so this uses plain str.find
 cursor scanning (C speed) instead of regex finditer.
 
 Output NanoApps/build/sb_events.tsv:
-  base \t B \t <bg image name>
-  base \t C \t <char> \t <stand file>
-  base \t S \t <speaker> \t <text> \t <voice>
+  base \t label \t B \t <bg image name>
+  base \t label \t C \t <char> \t <stand file>
+  base \t label \t S \t <speaker> \t <text> \t <voice>
 """
 import sys
 from pathlib import Path
@@ -46,9 +46,22 @@ rows = []
 for f in sorted(SCN.glob("*.psb.tjs")):
     base = f.name.split("ver")[0]
     s = f.read_text(encoding="utf-8", errors="replace")
-    ev = []                                    # (pos, payload)
+    ev = []                                    # (pos, label, payload)
 
-    # class / name / file with rolling context
+    # scene labels: "label" => "*name" — every following event belongs to
+    # the most recent label until the next one
+    labels = []                                # (pos, label)
+    for pos, val in scan(s, "label"):
+        labels.append((pos, val))
+    lstate = [0]
+
+    def label_at(p):
+        cur = ""
+        while lstate[0] < len(labels) and labels[lstate[0]][0] < p:
+            cur = labels[lstate[0]][1]
+            lstate[0] += 1
+        return cur
+
     c_iter = scan(s, "class")
     n_iter = scan(s, "name")
     c = next(c_iter, None)
@@ -64,12 +77,10 @@ for f in sorted(SCN.glob("*.psb.tjs")):
             nm = next(n_iter, None)
         cls = last_class[1] if 0 <= pos - last_class[0] < 8000 else ""
         if cls == "stage":
-            ev.append((pos, ("B", fname)))
+            ev.append((pos, label_at(pos), ("B", fname)))
         elif cls == "character":
-            # the "name" here is the LAYER (ch_effect / ch_effect0..), not the
-            # character — the character is the stand file's stem (芳乃.stand)
             ch = fname.split(".")[0] if "." in fname else fname
-            ev.append((pos, ("C", ch, fname)))
+            ev.append((pos, label_at(pos), ("C", ch, fname)))
 
     # dialogue blocks: a line that is just `"<sp>",` followed by a line
     # `void,` followed by `"<tx>",`  (object fields use `"k" => void,`)
@@ -113,18 +124,18 @@ for f in sorted(SCN.glob("*.psb.tjs")):
                 s8 = short_of(voice)          # FAT32 8.3 short name
                 if s8:
                     voice = s8[:-4]           # engine appends ".wav"
-            ev.append((i, ("S", sp, tx, voice)))
+            ev.append((i, label_at(i), ("S", sp, tx, voice)))
         p = i + 5
 
     ev.sort(key=lambda t: t[0])
-    for _, payload in ev:
-        rows.append((base,) + payload)
+    for _, lbl, payload in ev:
+        rows.append((base, lbl) + payload)
 
 with OUT.open("w", encoding="utf-8") as fh:
     for r in rows:
         fh.write("\t".join(r) + "\n")
-nb = sum(1 for r in rows if r[1] == "B")
-nc = sum(1 for r in rows if r[1] == "C")
-ns = sum(1 for r in rows if r[1] == "S")
-nv = sum(1 for r in rows if r[1] == "S" and r[4])
+nb = sum(1 for r in rows if r[2] == "B")
+nc = sum(1 for r in rows if r[2] == "C")
+ns = sum(1 for r in rows if r[2] == "S")
+nv = sum(1 for r in rows if r[2] == "S" and r[5])
 print(f"{len(rows)} events: {nb} bg, {nc} sprite, {ns} say ({nv} voiced)")
