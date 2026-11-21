@@ -1485,9 +1485,7 @@ static void compose_title(void)
         int w = ascii8_w("SENREN*BANKA", 2);
         draw_ascii8((SCR_W - w) / 2, 196, "SENREN*BANKA", 2, 0xF1FAEEu);
     }
-    /* ---- FONT SELF-TEST: F:<got-hex> X:<xor-hex> + engine-rendered sample.
-     * Compare got with the real font.bin size and xor with the local
-     * tools/font_sim.py value; "千恋万花" below must match the PC render. */
+    /* ---- FONT SELF-TEST ---- */
     {
         char b[40];
         static const char hex[] = "0123456789ABCDEF";
@@ -1535,6 +1533,37 @@ static void compose_title(void)
         if (s_font_w)
             draw_str("\xE5\x8D\x83\xE6\x81\x8B\xE4\xB8\x87\xE8\x8A\xB1", /* 千恋万花 */
                      6, 12, 0xFFD166u);
+    }
+    /* ---- AUDIO SELF-TEST: T44 (44.1k) -> T16 (16k) -> OS resource sound.
+     * Which one is audible tells us which formats the device decodes. */
+    {
+        static uint32_t t0;
+        static uint8_t step;
+        uint32_t el;
+        const char *lab;
+        char ab[32];
+        int k = 0;
+        if (!t0) t0 = s_ticks;
+        el = (s_ticks - t0) / 30u;
+        if (el >= 3u && step == 0) {
+            hb_audio_play_wav_main(DIR_BASE "/voice/T44.WAV", 0x7FFFu);
+            hb_display_wait_vsync();
+            step = 1;
+        } else if (el >= 8u && step == 1) {
+            hb_audio_play_wav_main(DIR_BASE "/voice/T16.WAV", 0x7FFFu);
+            hb_display_wait_vsync();
+            step = 2;
+        } else if (el >= 13u && step == 2) {
+            hb_audio_play_wav("Resources/Sounds/shake.wav", 0x7FFFu);
+            hb_display_wait_vsync();
+            step = 3;
+        }
+        lab = step == 0 ? "AUDIO:ready" :
+              step == 1 ? "AUDIO:T44 sent" :
+              step == 2 ? "AUDIO:T16 sent" : "AUDIO:SHAKE sent";
+        while (lab[k] && k < 30) { ab[k] = lab[k]; k++; }
+        ab[k] = 0;
+        draw_ascii8(6, 30, ab, 1, 0x6FCF97u);
     }
 }
 
@@ -2226,6 +2255,16 @@ void hb_raw_frame(const hb_spoint_t *touch)
 {
     uint8_t click, ffwd, back;
     int lx = 0, ly = 0;
+
+    /* Frame start: start the sound queued last frame, then yield once so the
+     * audio pthread gets CPU. Must be BEFORE the redraw work, and reached on
+     * every path (previous version only yielded on the dialogue path). */
+    if (s_pending_kind) {
+        hb_audio_play_wav_main(s_pending_snd, s_pending_vol);
+        s_pending_kind = 0;
+        s_pending_snd[0] = 0;
+        hb_display_wait_vsync();
+    }
 
     if (s_prev_mode != s_mode) {          /* mode switch: full repaint */
         s_prev_mode = s_mode;
