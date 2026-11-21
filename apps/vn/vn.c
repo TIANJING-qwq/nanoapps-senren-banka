@@ -1196,6 +1196,11 @@ static void step(void)
                 xmemcpy(path + 14, name, dl + 1);
                 xmemcpy(path + 14 + dl, ".WAV", 5);   /* FS is case-sensitive */
                 got = hb_fs_read(path, wh, 44);
+                if (got != 44) {          /* case-insensitive fallback */
+                    xmemcpy(path + 14 + dl, ".wav", 5);
+                    got = hb_fs_read(path, wh, 44);
+                    xmemcpy(path + 14 + dl, ".WAV", 5);
+                }
                 rate = got == 44 ? (uint32_t)wh[24] | ((uint32_t)wh[25] << 8)
                     | ((uint32_t)wh[26] << 16) | ((uint32_t)wh[27] << 24) : 0;
                 dsize = got == 44 ? (uint32_t)wh[40] | ((uint32_t)wh[41] << 8)
