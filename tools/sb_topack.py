@@ -291,6 +291,7 @@ def build_from_flow(ci, base, segs, next_no):
         cur_bg = ""
         pending = ""
         cur_spr = ""
+        cg_bg = ""            # stage that owns the current CG
         cur_cg = ""
         if sg["kind"] == "choice":
             opts = [(txt, seg_label.get(ti, -1))
@@ -305,13 +306,14 @@ def build_from_flow(ci, base, segs, next_no):
                 b += struct.pack("<I", tl) + s_str(tb)
             bodies.append(bytes(b))
             continue
-        hold_bg = False       # a CG must survive following bg events
         for e in sg["events"]:
             if e[0] == "B":
-                if hold_bg:
-                    continue
                 bb = bg_names.get(e[1])
                 if bb:
+                    if cg_bg and bb == cg_bg:
+                        continue          # same stage redraw: keep the CG
+                    if cg_bg:
+                        cg_bg = ""        # real scene change: CG is over
                     pending = bb
                 continue
             if e[0] == "E":
@@ -325,9 +327,9 @@ def build_from_flow(ci, base, segs, next_no):
                     b += bytes([OP_CG]) + s_str(asset.encode())
                     cur_cg = asset
                     cur_spr = ""
+                    cg_bg = pending or cur_bg
                     cur_bg = ""
                     pending = ""
-                    hold_bg = True
                 continue
             if e[0] == "C":
                 sp = spr_of.get(e[1]) or spr_of.get(e[1] + "a")
