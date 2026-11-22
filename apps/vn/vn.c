@@ -60,8 +60,8 @@
 
 #define SCRIPT_MAX      (160u * 1024u)
 #define FONT_GLYPH_MAX  3400
-#define FONT_W_MAX      16
-#define FONT_H_MAX      16
+#define FONT_W_MAX      20
+#define FONT_H_MAX      20
 #define FONT_FILE_MAX   (10u + (FONT_GLYPH_MAX) * \
                          (4u + (FONT_H_MAX) * (((FONT_W_MAX) + 7u) / 8u)))
 /* asset scratch: largest asset is a 432x240 RGB565 bg/cg (9-byte header +
