@@ -16,24 +16,19 @@ W, H = 432, 240
 
 
 def cover(im):
-    """The Mi Band pack's art is 336x480 PORTRAIT (made for a vertical watch
-    screen). Our screen is 432x240 landscape, so fit by height, centre it, and
-    fill the sides instead of cropping it into a thin vertical strip."""
+    """Real cover: scale until BOTH dimensions are filled, then centre-crop.
+    (The previous version fitted by height and pasted, which left the art as a
+    vertical band with black bars on both sides.)"""
     im = im.convert("RGB")
-    sc = H / im.height
-    nw = max(1, round(im.width * sc))
-    im = im.resize((nw, H), Image.LANCZOS)
-    out = Image.new("RGB", (W, H), (0, 0, 0))
-    if nw <= W:
-        out.paste(im, ((W - nw) // 2, 0))
-    else:
-        out.paste(im.crop(((nw - W) // 2, 0, (nw - W) // 2 + W, H)), (0, 0))
-    return out
+    sc = max(W / im.width, H / im.height)
+    nw, nh = max(W, round(im.width * sc)), max(H, round(im.height * sc))
+    im = im.resize((nw, nh), Image.LANCZOS)
+    return im.crop(((nw - W) // 2, (nh - H) // 2,
+                    (nw - W) // 2 + W, (nh - H) // 2 + H))
 
 
 def key_green(im):
-    """The pack's art sits on a chroma-key green backdrop; leaving it in
-    shows as a bright green frame once the image is rotated/scaled."""
+    """Event CG art sits on a chroma-key green backdrop."""
     im = im.convert("RGB")
     px = im.load()
     w, h = im.size
