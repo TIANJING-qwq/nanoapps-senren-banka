@@ -1929,6 +1929,7 @@ static uint16_t s_chart_nodes;
 static uint16_t s_chart_edges;
 static uint16_t s_chart_nroute;
 static int16_t  s_chart_scroll[CHART_TABS];
+static uint8_t  s_chart_started;
 static int16_t  s_chart_drag;
 static int16_t  s_chart_moved;
 static int16_t  s_chart_tapx;
@@ -2579,23 +2580,29 @@ void hb_raw_frame(const hb_spoint_t *touch)
             if (!s_prev_down) {
                 s_chart_drag = ly;
                 s_chart_moved = 0;
+                s_chart_started = 0;
                 s_chart_tapx = lx;
                 s_chart_tapy = ly;
             } else {
-                int d = (int)ly - (int)s_chart_drag;
-                if (d != 0) {
-                    int mx = (int)chart_max_scroll();
-                    int v = (int)s_chart_scroll[s_chart_route] - d;
-                    if (v < 0) v = 0;
-                    if (v > mx) v = mx;
-                    s_chart_scroll[s_chart_route] = (int16_t)v;
-                    s_chart_moved = (int16_t)(s_chart_moved +
-                                              (d < 0 ? -d : d));
-                    s_chart_drag = ly;
-                    s_need_full = 1;
+                int total = (int)ly - (int)s_chart_tapy;
+                int ad = total < 0 ? -total : total;
+                /* DEAD ZONE: finger jitter must not turn a tap into a scroll */
+                if (s_chart_started || ad > 10) {
+                    int d = (int)ly - (int)s_chart_drag;
+                    s_chart_started = 1;
+                    if (d != 0) {
+                        int mx = (int)chart_max_scroll();
+                        int v = (int)s_chart_scroll[s_chart_route] - d;
+                        if (v < 0) v = 0;
+                        if (v > mx) v = mx;
+                        s_chart_scroll[s_chart_route] = (int16_t)v;
+                        s_chart_moved = (int16_t)ad;
+                        s_chart_drag = ly;
+                        s_need_full = 1;
+                    }
                 }
             }
-        } else if (s_prev_down && s_chart_moved < 12) {
+        } else if (s_prev_down && !s_chart_started) {
             flow_hit(s_chart_tapx, s_chart_tapy);
         }
     }

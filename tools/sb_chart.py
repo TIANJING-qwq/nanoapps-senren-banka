@@ -106,7 +106,9 @@ def build():
         if t == "chapter":
             txt = it.get("name") or (caps.get(it["id"]) or [""])[0]
             extra = [c for c in (caps.get(it["id"]) or []) if c != txt]
-            return (txt + " " + " ".join(extra)).strip()
+            body = (txt + " " + " ".join(extra)).strip()
+            # show the chapter ordinal so the player knows where they are
+            return f"第{chapter_of(it) + 1}章 {body}"
         if t == "select" and it.get("comment"):
             return it["comment"]
         cap = caps.get(it["id"])
