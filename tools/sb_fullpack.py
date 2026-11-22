@@ -64,7 +64,7 @@ chars = {c for c in chars if ord(c) >= 0x20} - {"\n", "\t"}
 print(f"{len(chars)} unique glyphs needed")
 
 fp = find_font(None)
-blob = build_font(chars, 24, fp)
+blob = build_font(chars, 16, fp)
 (out / "font.bin").write_bytes(blob)
 print(f"font.bin {len(blob):,} B")
 
