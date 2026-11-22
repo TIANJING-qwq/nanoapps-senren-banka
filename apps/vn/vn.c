@@ -262,6 +262,8 @@ static uint8_t  s_prev_ffwd;
 static uint8_t  s_prev_back;
 static int16_t  s_dbg_lx = -1, s_dbg_ly = -1;      /* touch debug readout */
 static uint8_t  s_skip;                  /* skip-to-choice fast-forward   */
+static uint8_t  s_skip_bg;               /* skip to the next background   */
+static uint8_t  s_saw_bg;                /* step() just executed OP_BG    */
 static char     s_last_bgm[SAVENAME_MAX];
 static uint32_t s_bgm_ticks;             /* length of current bgm, frames */
 static uint32_t s_bgm_t0;                /* frame it (re)started at       */
@@ -1159,6 +1161,7 @@ static void step(void)
             char name[SAVENAME_MAX];
             rd_str(name, (uint16_t)sizeof name);
             set_bg(name);
+            s_saw_bg = 1;
             break;
         }
         case OP_SPR: {
@@ -1436,6 +1439,15 @@ static void draw_nameplate(const char *name)
 
 static void compose_textbox(void)
 {
+    /* scene shortcut buttons: jump to the next background / next choice */
+    if (s_mode == MODE_SCENE) {
+        lfill_rect(4, 2, 58, 16, 0x1D3557u);
+        lfill_rect(64, 2, 58, 16, 0x1D3557u);
+        if (s_font_w) {
+            draw_str("åºæ¯", 12, 0, 0xF1FAEEu);
+            draw_str("éé¡¹", 72, 0, 0xF1FAEEu);
+        }
+    }
     /* gradient: strong at the bottom, fading toward the top (鍘熺増椋?.
        First rebuild the box region's base pixels (bg + sprites) so the
        translucent gradient never compounds frame over frame. */
@@ -2670,8 +2682,19 @@ void hb_raw_frame(const hb_spoint_t *touch)
         if (click) s_mode = MODE_TITLE;
         break;
     case MODE_SCENE:
+        if (click && ly < 20) {                       /* scene shortcut bar */
+            if (lx >= 4 && lx < 62) { s_skip_bg = 1; s_skip = 0; break; }
+            if (lx >= 64 && lx < 122) { s_skip = 1; s_skip_bg = 0; break; }
+        }
         if (lx >= SCR_W - 40 && ly < 32 && click) {   /* corner menu zone */
             s_mode = MODE_IGMENU;
+            break;
+        }
+        if (s_skip_bg) {                               /* skip-to-next-bg */
+            if (click) { s_skip_bg = 0; break; }       /* tap cancels     */
+            s_saw_bg = 0;
+            step();
+            if (s_saw_bg || s_mode != MODE_SCENE) s_skip_bg = 0;
             break;
         }
         if (s_skip) {                                  /* skip-to-choice */
