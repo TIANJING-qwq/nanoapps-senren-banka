@@ -124,13 +124,24 @@ print(f"cg assets: {len(cg_sd_of)} sd, {len(cg_ev_by_num)} ev chapters")
 
 
 def cg_asset(name):
-    """Map a scenario CG reference to the asset name we actually ship."""
+    """Map a scenario CG reference to the asset we ship.
+
+    The scenario says e.g. "ev301aa" while the dump stores "ev301a"; a lookup
+    that simply returned None for anything unmapped threw away most CGs, so
+    fall back to the reference itself - the packer ships alias files under the
+    exact referenced names."""
+    cand = None
     if name.startswith("sd"):
-        return cg_sd_of.get(name)
-    if name.startswith("ev"):
+        cand = cg_sd_of.get(name)
+    elif name.startswith("ev"):
         m = re.match(r"ev(\d{3})", name)
         if m:
-            return cg_ev_by_num.get(m.group(1))
+            cand = cg_ev_by_num.get(m.group(1))
+    if cand:
+        return cand
+    # no mapping: use the name verbatim (alias files exist for these)
+    if re.fullmatch(r"(?:ev|sd)\d{3}[a-z]*", name):
+        return name
     return None
 
 # Execution graph (scenelist order + choices + per-label events)
@@ -262,7 +273,10 @@ def build_from_flow(ci, base, segs, next_no):
     seg_label = {}
     order = [i for i, sg in enumerate(segs)
              if sg["kind"] == "choice"
-             or any(e and e[0] == "S" for e in sg["events"])]
+             # a segment matters if it says something OR shows an event CG:
+             # CG-only segments have no dialogue and used to be dropped whole,
+             # which is why almost every in-story CG went missing
+             or any(e and e[0] in ("S", "E") for e in sg["events"])]
     for lid, i in enumerate(order):
         seg_label[i] = lid
 
