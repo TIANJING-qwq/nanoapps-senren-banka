@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Assemble the full Senren Banka pack: font over ALL dialogue chars +
 88-chapter scripts + flow.idx + converted bg/cg/title assets."""
 import struct
@@ -64,7 +64,7 @@ chars = {c for c in chars if ord(c) >= 0x20} - {"\n", "\t"}
 print(f"{len(chars)} unique glyphs needed")
 
 fp = find_font(None)
-blob = build_font(chars, 16, fp)
+blob = build_font(chars, 24, fp)
 (out / "font.bin").write_bytes(blob)
 print(f"font.bin {len(blob):,} B")
 
