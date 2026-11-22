@@ -1901,58 +1901,182 @@ static void cgview_hit(int lx, int ly)
 
 /* ------------------------------------------------------------ flowchart ---- */
 
+/* chart.idx ("VNCH"): u16 ver, u16 nodes, u16 edges, u16 routes, then
+   12-byte node records { i16 x, i16 y, u8 type, u8 route, u16 chapter,
+   u16 off, u16 len }, then edges { u16 from, u16 to }, then route table,
+   then a utf-8 blob holding titles and route names. */
+#define CHART_MAX   24576u
+#define CHART_HDR   16u
+#define CHART_REC   12u
+#define CHART_TOP   26
+#define CHART_BOT   206
+
+static uint8_t  s_chart_buf[CHART_MAX];
+static uint16_t s_chart_nodes;
+static uint16_t s_chart_edges;
+static uint8_t  s_chart_ok;
+static int16_t  s_chart_scroll;
+static int16_t  s_chart_drag;      /* last touch y while a drag is in flight */
+static int16_t  s_chart_moved;     /* total travel, to tell drag from tap    */
+static int16_t  s_chart_tapx;
+static int16_t  s_chart_tapy;
+
+static const uint8_t *chart_rec(uint16_t i)
+{
+    return s_chart_buf + CHART_HDR + (uint32_t)i * CHART_REC;
+}
+
+static uint16_t chart_u16(const uint8_t *p)
+{
+    return (uint16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
+}
+
+static uint8_t chart_load(void)
+{
+    uint32_t got;
+    if (s_chart_ok) return 1;
+    got = hb_fs_read_chunked(DIR_BASE "/chart.idx", s_chart_buf,
+                             sizeof s_chart_buf);
+    if (got < CHART_HDR || s_chart_buf[0] != 'V' || s_chart_buf[1] != 'N' ||
+        s_chart_buf[2] != 'C' || s_chart_buf[3] != 'H')
+        return 0;
+    s_chart_nodes = chart_u16(s_chart_buf + 6);
+    s_chart_edges = chart_u16(s_chart_buf + 8);
+    if (CHART_HDR + (uint32_t)s_chart_nodes * CHART_REC +
+        (uint32_t)s_chart_edges * 4u > got) {
+        s_chart_nodes = 0;
+        s_chart_edges = 0;
+        return 0;
+    }
+    s_chart_ok = 1;
+    s_chart_scroll = 0;
+    return 1;
+}
+
+static int16_t chart_max_scroll(void)
+{
+    int i, maxy = CHART_BOT + 20;
+    for (i = 0; i < (int)s_chart_nodes; i++) {
+        int y = (int)chart_u16(chart_rec((uint16_t)i) + 2) + 20;
+        if (y > maxy) maxy = y;
+    }
+    return (int16_t)(maxy - CHART_BOT);
+}
+
+static uint32_t chart_color(uint8_t type)
+{
+    switch (type) {
+    case 0:  return 0xE8998Du;        /* chapter header */
+    case 2:  return 0xFFD166u;        /* choice point   */
+    case 3:  return 0x6FCF97u;        /* branch         */
+    default: return 0x457B9Du;        /* scene          */
+    }
+}
+
+/* copy at most maxcp UTF-8 codepoints of a node title into out */
+static void chart_text(const uint8_t *rec, char *out, int maxcp)
+{
+    uint16_t off = chart_u16(rec + 8);
+    uint16_t len = chart_u16(rec + 10);
+    uint16_t nroute = chart_u16(s_chart_buf + 10);
+    uint32_t blob = CHART_HDR + (uint32_t)s_chart_nodes * CHART_REC +
+                    (uint32_t)s_chart_edges * 4u + (uint32_t)nroute * 4u;
+    const char *b = (const char *)s_chart_buf + blob + (uint32_t)off;
+    int i = 0, n = 0, cp = 0;
+    while (i < (int)len && cp < maxcp) {
+        unsigned char c = (unsigned char)b[i];
+        int adv = (c >= 0xF0) ? 4 : (c >= 0xE0) ? 3 : (c >= 0xC0) ? 2 : 1;
+        int k;
+        if (i + adv > (int)len) break;
+        for (k = 0; k < adv; k++) out[n++] = b[i + k];
+        i += adv;
+        cp++;
+    }
+    out[n] = 0;
+}
+
 static void compose_flow(void)
 {
-    int i, y;
+    int i;
+    char buf[40];
     lfill_rect(0, 0, SCR_W, SCR_H, 0x0B132Bu);
+    if (!chart_load()) {
+        draw_ascii8(12, 12, "no chart.idx", 2, 0xFF9A9Au);
+        return;
+    }
     if (s_font_w)
-        draw_str("\xE6\xB5\x81\xE7\xA8\x8B\xE5\x9B\xBE", 12, 6, 0xF1FAEEu);
+        draw_str("\xE6\xB5\x81\xE7\xA8\x8B\xE5\x9B\xBE", 10, 3, 0xF1FAEEu);
     else
-        draw_ascii8(12, 8, "FLOWCHART", 2, 0xF1FAEEu);
-    for (i = 0; i < 8; i++) {
-        uint16_t idx = (uint16_t)(s_flow_top + i);
-        int by = 32 + i * 26;
-        if (idx >= s_flow_n) break;
-        if (flow_is_seen(idx)) {
-            draw_button(20, by, 300, 24, s_flow_title[idx], "", 0x457B9Du);
-            lfill_rect(340, by + 4, 8, 16, 0x6FCF97u);      /* visited mark */
-        } else {
-            lfill_rect(20, by, 300, 24, 0x1A1E2Bu);
-            lrect_outline(20, by, 300, 24, 1, 0x30343Bu);
-            if (s_font_w)
-                draw_str_center("???", 170, by + 4, 0x50555Eu);
+        draw_ascii8(10, 6, "FLOWCHART", 1, 0xF1FAEEu);
+    draw_ascii8(180, 6, "drag=scroll tap=jump", 1, 0x8D99Aeu);
+
+    /* connectors first so the boxes sit on top */
+    for (i = 0; i < (int)s_chart_edges; i++) {
+        const uint8_t *e = s_chart_buf + CHART_HDR +
+                           (uint32_t)s_chart_nodes * CHART_REC +
+                           (uint32_t)i * 4;
+        uint16_t ai = chart_u16(e), bi = chart_u16(e + 2);
+        const uint8_t *A, *B;
+        int ax, ay, bx, by, k;
+        if (ai >= s_chart_nodes || bi >= s_chart_nodes) continue;
+        A = chart_rec(ai);
+        B = chart_rec(bi);
+        ax = (int)chart_u16(A) + 8;
+        ay = (int)chart_u16(A + 2) + 16 - s_chart_scroll;
+        bx = (int)chart_u16(B) + 8;
+        by = (int)chart_u16(B + 2) - s_chart_scroll;
+        if ((ay < CHART_TOP && by < CHART_TOP) ||
+            (ay > CHART_BOT && by > CHART_BOT))
+            continue;
+        for (k = ay; k < by; k += 2) {
+            if (k >= CHART_TOP && k < CHART_BOT && ax >= 0 && ax < SCR_W)
+                lpx(ax, k)[0] = 0xFF3A4A66u;
+        }
+        {
+            int x0 = ax < bx ? ax : bx, x1 = ax < bx ? bx : ax;
+            for (k = x0; k <= x1; k += 2) {
+                if (by >= CHART_TOP && by < CHART_BOT && k >= 0 && k < SCR_W)
+                    lpx(k, by)[0] = 0xFF3A4A66u;
+            }
         }
     }
-    y = SCR_H - 20;
-    draw_ascii8(12, y, "tap=jump  tap-low=scrol  vol=back", 1, 0x8D99Aeu);
+
+    /* node boxes */
+    for (i = 0; i < (int)s_chart_nodes; i++) {
+        const uint8_t *r = chart_rec((uint16_t)i);
+        int x = (int)chart_u16(r);
+        int y = (int)chart_u16(r + 2) - s_chart_scroll;
+        uint8_t type = r[4];
+        int w = (type == 0) ? 200 : 100;
+        int h = 18;
+        uint32_t col = chart_color(type);
+        if (y + h < CHART_TOP || y > CHART_BOT) continue;
+        if (x < -w || x > SCR_W) continue;
+        lfill_rect(x, y, w, h, type == 0 ? 0x2A3A5Au : 0x1D3557u);
+        lrect_outline(x, y, w, h, 1, col);
+        lfill_rect(x, y, 2, h, col);
+        chart_text(r, buf, (w - 12) / (s_font_w ? s_font_w : 8));
+        if (s_font_w)
+            draw_str(buf, x + 6, y + 1, 0xF1FAEEu);
+        else
+            draw_ascii8(x + 6, y + 1, buf, 1, 0xF1FAEEu);
+    }
 }
 
 static void flow_hit(int lx, int ly)
 {
     int i;
-    if (ly < 28) return;
-    if (ly >= 200) {                                   /* bottom strip = scroll */
-        s_flow_top = (uint16_t)((s_flow_top + 8) % (s_flow_n ? s_flow_n : 1));
-        return;
-    }
-    for (i = 0; i < 8; i++) {
-        uint16_t idx = (uint16_t)(s_flow_top + i);
-        int by = 32 + i * 26;
-        if (idx >= s_flow_n) break;
-        if (lx >= 20 && lx < 320 && ly >= by && ly < by + 24 && flow_is_seen(idx)) {
-            if (s_flow_ver >= 2u) {
-                /* chapter mode: node id is a chapter number */
-                if (load_script_chapter((uint16_t)s_flow_label[idx])) {
-                    s_mode = MODE_SCENE;
-                    step();
-                }
-            } else {
-                uint32_t off = label_offset(s_flow_label[idx]);
-                if (off != 0xFFFFFFFFu && off < s_script_len) {
-                    s_pc = off;
-                    s_mode = MODE_SCENE;
-                    step();
-                }
+    for (i = (int)s_chart_nodes - 1; i >= 0; i--) {
+        const uint8_t *r = chart_rec((uint16_t)i);
+        int x = (int)chart_u16(r);
+        int y = (int)chart_u16(r + 2) - s_chart_scroll;
+        uint8_t type = r[4];
+        int w = (type == 0) ? 200 : 100;
+        if (lx >= x && lx < x + w && ly >= y && ly < y + 18) {
+            uint16_t ch = chart_u16(r + 6);
+            if (load_script_chapter(ch)) {
+                s_mode = MODE_SCENE;
+                step();
             }
             return;
         }
@@ -2355,6 +2479,33 @@ void hb_raw_frame(const hb_spoint_t *touch)
     }
     s_prev_back = back;
 
+    /* chart screen: drag to scroll, short tap to jump */
+    if (s_mode == MODE_FLOW) {
+        if (touch && touch->down) {
+            if (!s_prev_down) {
+                s_chart_drag = ly;
+                s_chart_moved = 0;
+                s_chart_tapx = lx;
+                s_chart_tapy = ly;
+            } else {
+                int d = (int)ly - (int)s_chart_drag;
+                if (d != 0) {
+                    int mx = (int)chart_max_scroll();
+                    int v = (int)s_chart_scroll - d;
+                    if (v < 0) v = 0;
+                    if (v > mx) v = mx;
+                    s_chart_scroll = (int16_t)v;
+                    s_chart_moved = (int16_t)(s_chart_moved +
+                                              (d < 0 ? -d : d));
+                    s_chart_drag = ly;
+                    s_need_full = 1;
+                }
+            }
+        } else if (s_prev_down && s_chart_moved < 12) {
+            flow_hit(s_chart_tapx, s_chart_tapy);
+        }
+    }
+
     switch (s_mode) {
     case MODE_TITLE:
         if (click) title_hit(lx, ly);
@@ -2375,7 +2526,6 @@ void hb_raw_frame(const hb_spoint_t *touch)
         if (click) cgview_hit(lx, ly);
         break;
     case MODE_FLOW:
-        if (click) flow_hit(lx, ly);
         break;
     case MODE_CHSEL:
         if (click) chsel_hit(lx, ly);
