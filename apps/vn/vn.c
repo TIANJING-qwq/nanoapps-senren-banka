@@ -1930,6 +1930,7 @@ static uint16_t s_chart_edges;
 static uint16_t s_chart_nroute;
 static int16_t  s_chart_scroll[CHART_TABS];
 static uint8_t  s_chart_started;
+static int16_t  s_chart_dx;
 static int16_t  s_chart_drag;
 static int16_t  s_chart_moved;
 static int16_t  s_chart_tapx;
@@ -2124,10 +2125,24 @@ static void compose_flow(void)
         }
     }
 
+    /* centre this route's graph: a narrow route should not hug the left edge */
+    {
+        int16_t right = 0;
+        uint16_t k;
+        for (k = 0; k < n; k++) {
+            const uint8_t *rr = chart_rec((uint16_t)(base + k));
+            int w2 = (rr[4] == 0) ? CHART_W_CH : CHART_W;
+            int r2 = (int)chart_u16(rr) + w2;
+            if (r2 > right) right = (int16_t)r2;
+        }
+        s_chart_dx = (right > 0 && right < SCR_W - 8)
+                     ? (int16_t)((SCR_W - right) / 2) : 0;
+    }
+
     /* node boxes */
     for (i = 0; i < n; i++) {
         const uint8_t *r = chart_rec((uint16_t)(base + i));
-        int x = (int)chart_u16(r);
+        int x = (int)chart_u16(r) + s_chart_dx;
         int y = (int)chart_u16(r + 2) + CHART_TOP - scroll;
         uint8_t type = r[4];
         int w = (type == 0) ? CHART_W_CH : CHART_W;
@@ -2164,7 +2179,7 @@ static void flow_hit(int lx, int ly)
     chart_range(&base, &n);
     for (i = 0; i < n; i++) {
         const uint8_t *r = chart_rec((uint16_t)(base + (n - 1 - i)));
-        int x = (int)chart_u16(r);
+        int x = (int)chart_u16(r) + s_chart_dx;
         int y = (int)chart_u16(r + 2) + CHART_TOP - s_chart_scroll[s_chart_route];
         int w = (r[4] == 0) ? CHART_W_CH : CHART_W;
         if (lx >= x && lx < x + w && ly >= y && ly < y + 18) {
@@ -2583,11 +2598,14 @@ void hb_raw_frame(const hb_spoint_t *touch)
                 s_chart_started = 0;
                 s_chart_tapx = lx;
                 s_chart_tapy = ly;
+                /* route tabs must react on press, not on release: a drag
+                   down the content area must never swallow a tab tap */
+                if (ly < CHART_TABH + 4) flow_hit(lx, ly);
             } else {
                 int total = (int)ly - (int)s_chart_tapy;
                 int ad = total < 0 ? -total : total;
                 /* DEAD ZONE: finger jitter must not turn a tap into a scroll */
-                if (s_chart_started || ad > 10) {
+                if (s_chart_started || ad > 16) {
                     int d = (int)ly - (int)s_chart_drag;
                     s_chart_started = 1;
                     if (d != 0) {
@@ -2602,8 +2620,12 @@ void hb_raw_frame(const hb_spoint_t *touch)
                     }
                 }
             }
-        } else if (s_prev_down && !s_chart_started) {
-            flow_hit(s_chart_tapx, s_chart_tapy);
+        } else if (s_prev_down) {
+            int tdx = (int)lx - (int)s_chart_tapx;
+            int tdy = (int)ly - (int)s_chart_tapy;
+            if (tdx < 0) tdx = -tdx;
+            if (tdy < 0) tdy = -tdy;
+            if (tdx + tdy < 30) flow_hit(s_chart_tapx, s_chart_tapy);
         }
     }
 
