@@ -58,7 +58,7 @@
 
 /* ------------------------------------------------------------- pack caps --- */
 
-#define SCRIPT_MAX      (128u * 1024u)
+#define SCRIPT_MAX      (160u * 1024u)
 #define FONT_GLYPH_MAX  3400
 #define FONT_W_MAX      24
 #define FONT_H_MAX      24
@@ -67,7 +67,7 @@
 /* asset scratch: largest asset is a 432x240 RGB565 bg/cg (9-byte header +
  * 2 bytes/pixel). MUST be separate from s_font_file: images loaded every
  * frame used to overwrite the glyph bitmaps (the "all CJK garbled" bug). */
-#define ASSET_MAX       (9u + 160u * 220u * 3u)  /* sprite staging (bg/cg convert in place) */
+#define ASSET_MAX       (9u + 432u * 240u * 2u)  /* largest staged asset = a full-screen bg/cg */
 #define BG_W            SCR_W
 #define BG_H            SCR_H
 #define SPR_SLOTS       1
@@ -147,7 +147,7 @@ static uint16_t s_chapter;
 static uint32_t s_pc;
 
 /* scene caches */
-static uint16_t s_bg[BG_PX + 5];   /* +5 = header slack for in-place bg loads */
+static uint16_t s_bg[BG_W * BG_H];
 static uint8_t  s_bg_ok;
 static char     s_cur_bg[SAVENAME_MAX];
 
@@ -566,27 +566,14 @@ static uint8_t load_asset(const char *dir, const char *name, uint16_t want_w,
     need = 9u + px * 2u + (fmt == 1u ? px : 0u);
     if (need > ASSET_MAX) { rd_err(0xE5u); return 0; }
 
-    if (fmt != 1u && color_out && w == BG_W && h == BG_H) {
-        /* bg/cg: read the raw VNBI straight into the destination and
-           de-interleave in place. Safe because the write cursor (i*2)
-           always stays 9 bytes BEHIND the read cursor (9 + i*2). */
-        const uint8_t *raw;
-        got = hb_fs_read_chunked(path, (uint8_t *)color_out, need);
-        if (got != need) return 0;
-        raw = (const uint8_t *)color_out;
+    got = hb_fs_read_chunked(path, s_asset_buf, need);
+    if (got != need) return 0;
+    if (color_out)
         for (i = 0; i < px; i++)
-            color_out[i] = (uint16_t)((uint16_t)raw[9u + i * 2u] |
-                                      ((uint16_t)raw[9u + i * 2u + 1u] << 8));
-    } else {
-        got = hb_fs_read_chunked(path, s_asset_buf, need);
-        if (got != need) return 0;
-        if (color_out)
-            for (i = 0; i < px; i++)
-                color_out[i] = (uint16_t)((uint16_t)s_asset_buf[9u + i * 2u] |
-                                          ((uint16_t)s_asset_buf[9u + i * 2u + 1u] << 8));
-        if (alpha_out && fmt == 1u)
-            xmemcpy(alpha_out, s_asset_buf + 9u + px * 2u, px);
-    }
+            color_out[i] = (uint16_t)((uint16_t)s_asset_buf[9u + i * 2u] |
+                                      ((uint16_t)s_asset_buf[9u + i * 2u + 1u] << 8));
+    if (alpha_out && fmt == 1u)
+        xmemcpy(alpha_out, s_asset_buf + 9u + px * 2u, px);
     if (out_w) *out_w = w;
     if (out_h) *out_h = h;
     return 1;
