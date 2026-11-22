@@ -1,9 +1,9 @@
-/*
- * vn — landscape visual-novel player for NanoApps: the on-device half of
+﻿/*
+ * vn 鈥?landscape visual-novel player for NanoApps: the on-device half of
  * the galgame port pipeline (see tools/build_galpack.py for the host half).
  *
  * LANDSCAPE by design: the logical screen is 432x240 and the user holds
- * the nano rotated 90° clockwise (home button on the LEFT, volume buttons
+ * the nano rotated 90掳 clockwise (home button on the LEFT, volume buttons
  * toward the top). The engine maps logical (lx, ly) to the physical
  * 240x432 framebuffer as:
  *     phys_x = ly,  phys_y = lx      (fb[lx*240 + ly])
@@ -93,7 +93,7 @@
 #define OP_SPR     0x03   /* u8 slot, u8 pos, u16 nlen, name[]          */
 #define OP_SPRCLR  0x04   /* u8 mask                                    */
 #define OP_BGM     0x05   /* u16 nlen, name[]                           */
-#define OP_VOICE   0x0B   /* u16 nlen, name[] — line voice clip          */
+#define OP_VOICE   0x0B   /* u16 nlen, name[] 鈥?line voice clip          */
 #define OP_SAY     0x06   /* u16 nlen, name[], u16 tlen, text[]         */
 #define OP_CHOICE  0x07   /* u8 n, n * (u32 label, u16 tlen, text[])    */
 #define OP_JUMP    0x08   /* u32 label_id                               */
@@ -115,7 +115,7 @@ enum {
     MODE_GALLERY,         /* CG grid                                     */
     MODE_CGVIEW,          /* CG fullscreen                               */
     MODE_FLOW,            /* flowchart / chapter jump                    */
-    MODE_CHSEL,           /* chapter select by route (共通/个人/后日谈)  */
+    MODE_CHSEL,           /* chapter select by route (鍏遍€?涓汉/鍚庢棩璋?  */
     MODE_SETTINGS,
     MODE_END,
     MODE_ERROR,
@@ -189,7 +189,7 @@ static uint8_t  s_flow_seen[(FLOW_MAX + 7) / 8];
 static uint16_t s_flow_top;              /* scroll line                    */
 static uint8_t  s_seen_dirty;
 
-/* chapter select (VNCS): grouped route list 共通/个人线/后日谈 */
+/* chapter select (VNCS): grouped route list 鍏遍€?涓汉绾?鍚庢棩璋?*/
 #define CHSEL_MAX  96
 #define CHSEL_GROUP_N 7
 static uint16_t s_chsel_n;
@@ -199,10 +199,11 @@ static char     s_chsel_title[CHSEL_MAX][NAME_MAX];
 static uint16_t s_chsel_top;
 
 /* settings */
-static uint8_t  s_set_speed;             /* 0瞬 1快 2普 3慢                 */
-static uint8_t  s_set_auto;              /* 0 off 1快 2普 3慢               */
+static uint8_t  s_set_speed;             /* 0鐬?1蹇?2鏅?3鎱?                */
+static uint8_t  s_set_auto;              /* 0 off 1蹇?2鏅?3鎱?              */
 static uint8_t  s_set_volume;            /* 0..8                           */
 static uint8_t  s_set_unlock;            /* debug: show all CG / flowchart */
+static uint8_t  s_set_voice = 1;         /* voice playback on/off          */
 static uint8_t  s_need_full;             /* repaint bg+sprites this frame  */
 static uint8_t  s_prev_mode = 0xFFu;     /* detect mode switches           */
 
@@ -263,7 +264,7 @@ static uint32_t s_bgm_t0;                /* frame it (re)started at       */
 static uint16_t s_bgm_vol;               /* volume of the current bgm     */
 static uint32_t s_voice_ticks;  /* voice window length in frames (~33ms) */
 static uint32_t s_voice_t0;     /* frame counter when it started       */
-#define VOICE_TICK_MS 33u       /* one s_ticks frame ≈ 33 ms            */
+#define VOICE_TICK_MS 33u       /* one s_ticks frame 鈮?33 ms            */
 static uint32_t s_err;
 static uint8_t  s_save_valid;
 static uint32_t s_save_off;
@@ -273,7 +274,7 @@ static char     s_save_bg[SAVENAME_MAX];
 static char     s_save_spr[SPR_SLOTS][SAVENAME_MAX];
 static uint8_t  s_save_pos[SPR_SLOTS];
 
-/* dialogue rewind ring: offsets of the last SAY ops (快退) */
+/* dialogue rewind ring: offsets of the last SAY ops (蹇€€) */
 #define HIST_MAX 24
 static uint32_t s_hist[HIST_MAX];
 static uint8_t  s_hist_n;
@@ -390,10 +391,10 @@ static void rd_str(char *dst, uint16_t dst_size)
 }
 
 /* ----------------------------------------------------- landscape drawing --- */
-/* Device held rotated 90° CW (Home button LEFT): physical top edge faces
+/* Device held rotated 90掳 CW (Home button LEFT): physical top edge faces
  * the user's right, so logical X grows toward DECREASING physical y:
  *   fb[(SCR_W-1-lx)*240 + ly]
- * (the previous lx*240+ly form was the CCW grip — a mirror image.) */
+ * (the previous lx*240+ly form was the CCW grip 鈥?a mirror image.) */
 
 static uint32_t *lpx(int lx, int ly)
 {
@@ -846,6 +847,7 @@ static void settings_load(void)
         if (buf[6] <= 3) s_set_auto = buf[6];
         if (buf[7] <= 8) s_set_volume = buf[7];
         if (buf[9] & 1u) s_set_unlock = 1;
+        if (buf[9] & 2u) s_set_voice = 1; else s_set_voice = 0;
     }
 }
 
@@ -854,7 +856,9 @@ static void settings_save(void)
     uint8_t buf[10];
     buf[0] = 'V'; buf[1] = 'N'; buf[2] = 'S'; buf[3] = 'T';
     buf[4] = 2; buf[5] = s_set_speed; buf[6] = s_set_auto; buf[7] = s_set_volume;
-    buf[8] = 0; buf[9] = s_set_unlock ? 1u : 0u;
+    buf[8] = 0;
+    buf[9] = (uint8_t)((s_set_unlock ? 1u : 0u) |
+                     (s_set_voice ? 2u : 0u));
     hb_fs_write(DIR_BASE "/settings.bin", buf, 10);
 }
 
@@ -1010,14 +1014,14 @@ static void save_load(void)
 static void quick_save(void)
 {
     write_slot(SLOT_QUICK);
-    set_toast("\xE5\xB7\xB2\xE5\xBF\xAB\xE9\x80\x9F\xE5\xAD\x98\xE6\xA1\xA3");  /* 已快速存档 */
+    set_toast("\xE5\xB7\xB2\xE5\xBF\xAB\xE9\x80\x9F\xE5\xAD\x98\xE6\xA1\xA3");  /* 宸插揩閫熷瓨妗?*/
 }
 
 static uint8_t quick_load(void)
 {
     if (!read_slot_into(SLOT_QUICK)) return 0;
     continue_game();
-    set_toast("\xE5\xB7\xB2\xE5\xBF\xAB\xE9\x80\x9F\xE8\xAF\xBB\xE6\xA1\xA3");  /* 已快速读档 */
+    set_toast("\xE5\xB7\xB2\xE5\xBF\xAB\xE9\x80\x9F\xE8\xAF\xBB\xE6\xA1\xA3");  /* 宸插揩閫熻妗?*/
     return 1;
 }
 
@@ -1081,7 +1085,7 @@ static uint32_t label_offset(uint32_t id)
            ((uint32_t)s_script[15u + id * 4u] << 24);
 }
 
-/* dialogue rewind ring (快退): offsets of recent SAY ops */
+/* dialogue rewind ring (蹇€€): offsets of recent SAY ops */
 static void hist_push(uint32_t off)
 {
     if (s_hist_n && s_hist[s_hist_n - 1u] == off) return;   /* replay dup */
@@ -1096,7 +1100,7 @@ static void hist_push(uint32_t off)
 static void rewind_line(void)
 {
     if (s_hist_n < 2u) {
-        set_toast("\xE5\xB7\xB2\xE5\x88\xB0\xE5\xBC\x80\xE5\xA4\xB4");  /* 已到开头 */
+        set_toast("\xE5\xB7\xB2\xE5\x88\xB0\xE5\xBC\x80\xE5\xA4\xB4");  /* 宸插埌寮€澶?*/
         return;
     }
     s_hist_n--;
@@ -1163,7 +1167,7 @@ static void step(void)
             break;
         }
         case OP_VOICE: {
-            /* u16 nlen, name[] — play /Data/vn/voice/<name>.wav for this
+            /* u16 nlen, name[] 鈥?play /Data/vn/voice/<name>.wav for this
                line. VOICE runs right before its SAY, so s_voice_ms/t0
                still describe the PREVIOUS line here: if that clip is
                inside its window we stay silent (device API is
@@ -1179,7 +1183,7 @@ static void step(void)
             if (14u + dl + 5u < sizeof path) {
                 uint8_t wh[44];
                 uint32_t got, rate, dsize;
-                /* "/Data/vn/voice/" is 15 chars — the old 14 dropped the
+                /* "/Data/vn/voice/" is 15 chars 鈥?the old 14 dropped the
                    trailing slash and glued the file name onto "voice". */
                 xmemcpy(path, DIR_BASE "/voice/", 15);
                 xmemcpy(path + 15, name, dl + 1);
@@ -1207,7 +1211,7 @@ static void step(void)
                    a rewind or a duplicated op would otherwise sound like the
                    same line doubling up */
                 if (str_eq(name, s_last_voice)) break;
-                if (s_voice_ticks && !audio_busy()) {
+                if (s_set_voice && s_voice_ticks && !audio_busy()) {
                     /* queue it: plays at the next frame start, OUTSIDE the
                        touch-event context. Skipped while another clip is
                        still playing (the API is single-shot). */
@@ -1401,7 +1405,7 @@ static void draw_nameplate(const char *name)
 
 static void compose_textbox(void)
 {
-    /* gradient: strong at the bottom, fading toward the top (原版风).
+    /* gradient: strong at the bottom, fading toward the top (鍘熺増椋?.
        First rebuild the box region's base pixels (bg + sprites) so the
        translucent gradient never compounds frame over frame. */
     int y;
@@ -1417,7 +1421,7 @@ static void compose_textbox(void)
     lrect_outline(BOX_X, BOX_Y, BOX_W, BOX_H, 1, 0x3A86FFu);
     if (s_have_name && s_font_w)
         draw_nameplate(s_say_name);
-    /* voice progress bar: small strip along the textbox bottom (原版风) */
+    /* voice progress bar: small strip along the textbox bottom (鍘熺増椋? */
     if (s_voice_ticks) {
         uint32_t el = s_ticks - s_voice_t0;
         uint32_t frac = el >= s_voice_ticks ? 8 :
@@ -1487,20 +1491,20 @@ static void draw_title_bg(void)
 /* title menu occupies the LEFT column, like the original game */
 #define TITLE_X   14
 #define TITLE_W   118
-#define TITLE_Y0  42
-#define TITLE_DY  31
+#define TITLE_Y0  38
+#define TITLE_DY  27
 #define TITLE_N   7
 
 static void compose_title(void)
 {
     static const char *const cjk[TITLE_N] = {
-        "\xE5\xBC\x80\xE5\xA7\x8B\xE6\xB8\xB8\xE6\x88\x8F",        /* 开始游戏 */
-        "\xE7\xBB\xA7\xE7\xBB\xAD\xE6\xB8\xB8\xE6\x88\x8F",        /* 继续游戏 */
-        "\xE7\xAB\xA0\xE8\x8A\x82\xE9\x80\x89\xE6\x8B\xA9",        /* 章节选择 */
-        "\xE8\xAF\xBB\xE6\xA1\xA3",                                /* 读档     */
-        "CG\xE9\x89\xB4\xE8\xB5\x8F",                              /* CG鉴赏   */
-        "\xE6\xB5\x81\xE7\xA8\x8B\xE5\x9B\xBE",                    /* 流程图   */
-        "\xE8\xAE\xBE\xE7\xBD\xAE",                                /* 设置     */
+        "\xE5\xBC\x80\xE5\xA7\x8B\xE6\xB8\xB8\xE6\x88\x8F",        /* 寮€濮嬫父鎴?*/
+        "\xE7\xBB\xA7\xE7\xBB\xAD\xE6\xB8\xB8\xE6\x88\x8F",        /* 缁х画娓告垙 */
+        "\xE7\xAB\xA0\xE8\x8A\x82\xE9\x80\x89\xE6\x8B\xA9",        /* 绔犺妭閫夋嫨 */
+        "\xE8\xAF\xBB\xE6\xA1\xA3",                                /* 璇绘。     */
+        "CG\xE9\x89\xB4\xE8\xB5\x8F",                              /* CG閴磋祻   */
+        "\xE6\xB5\x81\xE7\xA8\x8B\xE5\x9B\xBE",                    /* 娴佺▼鍥?  */
+        "\xE8\xAE\xBE\xE7\xBD\xAE",                                /* 璁剧疆     */
     };
     static const char *const asc[TITLE_N] = {
         "START", "CONTINUE", "CHAPTERS", "LOAD", "CG MODE", "FLOW", "CONFIG",
@@ -1579,18 +1583,18 @@ static void choice_hit(int lx, int ly)
 
 /* 12 items, two columns of six (system | save & modes) */
 static const char *const IG_ITEMS_CJK[12] = {
-    "\xE8\xBF\x94\xE5\x9B\x9E\xE6\xB8\xB8\xE6\x88\x8F",            /* 返回游戏 */
-    "\xE8\x87\xAA\xE5\x8A\xA8\xE6\x92\xAD\xE6\x94\xBE",            /* 自动播放 */
-    "\xE5\xBF\xAB\xE8\xBF\x9B\xE6\xA8\xA1\xE5\xBC\x8F",            /* 快进模式 */
-    "\xE4\xB8\x8A\xE4\xB8\x80\xE5\x8F\xA5",                        /* 上一句   */
-    "\xE8\xAE\xBE\xE7\xBD\xAE",                                    /* 设置     */
-    "\xE8\xBF\x94\xE5\x9B\x9E\xE6\xA0\x87\xE9\xA2\x98",            /* 返回标题 */
-    "\xE5\xAD\x98\xE6\xA1\xA3",                                    /* 存档     */
-    "\xE8\xAF\xBB\xE6\xA1\xA3",                                    /* 读档     */
-    "\xE5\xBF\xAB\xE9\x80\x9F\xE5\xAD\x98\xE6\xA1\xA3",            /* 快速存档 */
-    "\xE5\xBF\xAB\xE9\x80\x9F\xE8\xAF\xBB\xE6\xA1\xA3",            /* 快速读档 */
-    "CG\xE9\x89\xB4\xE8\xB5\x8F",                                  /* CG鉴赏   */
-    "\xE6\xB5\x81\xE7\xA8\x8B\xE5\x9B\xBE",                        /* 流程图   */
+    "\xE8\xBF\x94\xE5\x9B\x9E\xE6\xB8\xB8\xE6\x88\x8F",            /* 杩斿洖娓告垙 */
+    "\xE8\x87\xAA\xE5\x8A\xA8\xE6\x92\xAD\xE6\x94\xBE",            /* 鑷姩鎾斁 */
+    "\xE5\xBF\xAB\xE8\xBF\x9B\xE6\xA8\xA1\xE5\xBC\x8F",            /* 蹇繘妯″紡 */
+    "\xE4\xB8\x8A\xE4\xB8\x80\xE5\x8F\xA5",                        /* 涓婁竴鍙?  */
+    "\xE8\xAE\xBE\xE7\xBD\xAE",                                    /* 璁剧疆     */
+    "\xE8\xBF\x94\xE5\x9B\x9E\xE6\xA0\x87\xE9\xA2\x98",            /* 杩斿洖鏍囬 */
+    "\xE5\xAD\x98\xE6\xA1\xA3",                                    /* 瀛樻。     */
+    "\xE8\xAF\xBB\xE6\xA1\xA3",                                    /* 璇绘。     */
+    "\xE5\xBF\xAB\xE9\x80\x9F\xE5\xAD\x98\xE6\xA1\xA3",            /* 蹇€熷瓨妗?*/
+    "\xE5\xBF\xAB\xE9\x80\x9F\xE8\xAF\xBB\xE6\xA1\xA3",            /* 蹇€熻妗?*/
+    "CG\xE9\x89\xB4\xE8\xB5\x8F",                                  /* CG閴磋祻   */
+    "\xE6\xB5\x81\xE7\xA8\x8B\xE5\x9B\xBE",                        /* 娴佺▼鍥?  */
 };
 static const char *const IG_ITEMS_ASC[12] = {
     "RESUME", "AUTO", "SKIP", "PREV", "CONFIG", "TITLE",
@@ -1628,7 +1632,7 @@ static void igmenu_hit(int lx, int ly)
     case 1: s_set_auto = (uint8_t)((s_set_auto + 1) & 3); settings_save(); break;
     case 2: s_skip ^= 1u;
             s_set_auto = 0;
-            if (s_skip) set_toast("\xE5\xBF\xAB\xE8\xBF\x9B\xE4\xB8\xAD");  /* 快进中 */
+            if (s_skip) set_toast("\xE5\xBF\xAB\xE8\xBF\x9B\xE4\xB8\xAD");  /* 蹇繘涓?*/
             s_mode = MODE_SCENE;
             break;
     case 3: s_mode = MODE_SCENE; rewind_line(); break;
@@ -1639,7 +1643,7 @@ static void igmenu_hit(int lx, int ly)
     case 7: s_slot_pick = MODE_LOAD; s_ret_mode = MODE_SCENE;
             s_mode = MODE_SAVELOAD; break;
     case 8: quick_save(); s_mode = MODE_SCENE; break;
-    case 9: if (!quick_load()) set_toast("\xE6\x97\xA0\xE5\xBF\xAB\xE9\x80\x9F\xE5\xAD\x98\xE6\xA1\xA3");  /* 无快速存档 */
+    case 9: if (!quick_load()) set_toast("\xE6\x97\xA0\xE5\xBF\xAB\xE9\x80\x9F\xE5\xAD\x98\xE6\xA1\xA3");  /* 鏃犲揩閫熷瓨妗?*/
             break;
     case 10: s_mode = MODE_GALLERY; s_cg_page = 0; break;
     case 11: s_mode = MODE_FLOW; s_flow_top = 0; break;
@@ -1651,9 +1655,9 @@ static void igmenu_hit(int lx, int ly)
 
 static void compose_saveload(void)
 {
-    static const char *save_t = "\xE5\xAD\x98\xE6\xA1\xA3";       /* 存档 */
-    static const char *load_t = "\xE8\xAF\xBB\xE6\xA1\xA3";       /* 读档 */
-    static const char *empty  = "--- \xE7\xA9\xBA ---";           /* 空   */
+    static const char *save_t = "\xE5\xAD\x98\xE6\xA1\xA3";       /* 瀛樻。 */
+    static const char *load_t = "\xE8\xAF\xBB\xE6\xA1\xA3";       /* 璇绘。 */
+    static const char *empty  = "--- \xE7\xA9\xBA ---";           /* 绌?  */
     int i;
     lfill_rect(0, 0, SCR_W, SCR_H, 0x141021u);
     if (s_font_w)
@@ -1678,8 +1682,8 @@ static void compose_saveload(void)
     }
     /* quick + auto rows */
     {
-        static const char *qc = "\xE5\xBF\xAB\xE9\x80\x9F";       /* 快速 */
-        static const char *ac = "\xE8\x87\xAA\xE5\x8A\xA8";       /* 自动 */
+        static const char *qc = "\xE5\xBF\xAB\xE9\x80\x9F";       /* 蹇€?*/
+        static const char *ac = "\xE8\x87\xAA\xE5\x8A\xA8";       /* 鑷姩 */
         int yq = 26 + SAVE_SLOTS * 20, ya = yq + 20, k;
         const char *rows[2];
         uint8_t have[2];
@@ -1709,15 +1713,15 @@ static void saveload_hit(int lx, int ly)
         if (lx < 10 || lx >= 422) return;
         if (s_slot_pick == MODE_SAVE) {
             write_slot((uint8_t)i);
-            set_toast("\xE5\xB7\xB2\xE4\xBF\x9D\xE5\xAD\x98");   /* 已保存 */
+            set_toast("\xE5\xB7\xB2\xE4\xBF\x9D\xE5\xAD\x98");   /* 宸蹭繚瀛?*/
             s_mode = s_ret_mode;
         } else if (s_slot_meta[i]) {
             if (read_slot_into((uint8_t)i)) {
                 continue_game();
-                set_toast("\xE5\xB7\xB2\xE8\xAF\xBB\xE6\xA1\xA3");  /* 已读档 */
+                set_toast("\xE5\xB7\xB2\xE8\xAF\xBB\xE6\xA1\xA3");  /* 宸茶妗?*/
             }
         } else {
-            set_toast("\xE7\xA9\xBA\xE6\xA7\xBD\xE4\xBD\x8D");    /* 空槽位 */
+            set_toast("\xE7\xA9\xBA\xE6\xA7\xBD\xE4\xBD\x8D");    /* 绌烘Ы浣?*/
         }
         return;
     }
@@ -1809,7 +1813,7 @@ static void compose_gallery(void)
     if (s_font_w) {
         char buf[NAME_MAX];
         uint32_t k = 0;
-        const char *p1 = "\xE9\xA1\xB5 ";                      /* 页 */
+        const char *p1 = "\xE9\xA1\xB5 ";                      /* 椤?*/
         while (*p1 && k < NAME_MAX - 12) buf[k++] = *p1++;
         buf[k++] = '1' + (char)(s_cg_page % 10);
         if (pages > 1) { buf[k++] = '/'; buf[k++] = '1' + (char)((pages - 1) % 10); }
@@ -1928,16 +1932,16 @@ static void flow_hit(int lx, int ly)
 /* ------------------------------------------------------- chapter select --- */
 
 /* chsel.idx: "VNCS" u16 ver(1) u16 n, then n x (u8 group, u16 chapter,
-   u16 nlen, name[]). group: 0 共通 1 芳乃 2 茉子 3 丛雨 4 蕾娜 5 小春
-   6 芦花 — matches the original game's route structure (scenelist) */
+   u16 nlen, name[]). group: 0 鍏遍€?1 鑺充箖 2 鑼夊瓙 3 涓涢洦 4 钑惧 5 灏忔槬
+   6 鑺﹁姳 鈥?matches the original game's route structure (scenelist) */
 static const char *const CHSEL_GROUP_CJK[CHSEL_GROUP_N] = {
-    "\xE5\x85\xB1\xE9\x80\x9A\xE7\xBA\xBF",                    /* 共通线 */
-    "\xE8\x8A\xB3\xE4\xB9\x83\xE7\xBA\xBF",                    /* 芳乃线 */
-    "\xE8\x8C\x89\xE5\xAD\x90\xE7\xBA\xBF",                    /* 茉子线 */
-    "\xE4\xB8\x9B\xE9\x9B\xA8\xE7\xBA\xBF",                    /* 丛雨线 */
-    "\xE8\x95\xBE\xE5\xA8\x9C\xE7\xBA\xBF",                    /* 蕾娜线 */
-    "\xE5\xB0\x8F\xE6\x98\xA5\xE7\xBA\xBF",                    /* 小春线 */
-    "\xE8\x8A\xA6\xE8\x8A\xB1\xE7\xBA\xBF",                    /* 芦花线 */
+    "\xE5\x85\xB1\xE9\x80\x9A\xE7\xBA\xBF",                    /* 鍏遍€氱嚎 */
+    "\xE8\x8A\xB3\xE4\xB9\x83\xE7\xBA\xBF",                    /* 鑺充箖绾?*/
+    "\xE8\x8C\x89\xE5\xAD\x90\xE7\xBA\xBF",                    /* 鑼夊瓙绾?*/
+    "\xE4\xB8\x9B\xE9\x9B\xA8\xE7\xBA\xBF",                    /* 涓涢洦绾?*/
+    "\xE8\x95\xBE\xE5\xA8\x9C\xE7\xBA\xBF",                    /* 钑惧绾?*/
+    "\xE5\xB0\x8F\xE6\x98\xA5\xE7\xBA\xBF",                    /* 灏忔槬绾?*/
+    "\xE8\x8A\xA6\xE8\x8A\xB1\xE7\xBA\xBF",                    /* 鑺﹁姳绾?*/
 };
 
 static void load_chsel(void)
@@ -1977,7 +1981,7 @@ static void compose_chsel(void)
     lfill_rect(0, 0, SCR_W, SCR_H, 0x0B132Bu);
     if (s_font_w)
         draw_str("\xE7\xAB\xA0\xE8\x8A\x82\xE9\x80\x89\xE6\x8B\xA9", 12, 6,
-                 0xF1FAEEu);                                   /* 章节选择 */
+                 0xF1FAEEu);                                   /* 绔犺妭閫夋嫨 */
     else
         draw_ascii8(12, 8, "CHAPTERS", 2, 0xF1FAEEu);
     for (i = s_chsel_top; i < s_chsel_n && y < SCR_H - 24; i++) {
@@ -2034,35 +2038,43 @@ static void compose_settings(void)
         draw_str("\xE8\xAE\xBE\xE7\xBD\xAE", 12, 6, 0xF1FAEEu);
     else
         draw_ascii8(12, 8, "CONFIG", 2, 0xF1FAEEu);
-    draw_button(20, 40, 392, 30, "\xE6\x96\x87\xE5\xAD\x97\xE9\x80\x9F\xE5\xBA\xA6", "TEXT SPEED", 0x457B9Du);
-    draw_str(SPEED_CJK[s_set_speed], 330, 48, 0xFFD166u);
-    if (!s_font_w) draw_ascii8(330, 50, "SPD", 1, 0xFFD166u);
-    draw_button(20, 78, 392, 30, "\xE8\x87\xAA\xE5\x8A\xA8\xE6\x92\xAD\xE6\x94\xBE", "AUTO MODE", 0x457B9Du);
-    draw_str(AUTO_CJK[s_set_auto], 330, 86, 0xFFD166u);
-    if (!s_font_w) draw_ascii8(330, 88, "AUT", 1, 0xFFD166u);
-    draw_button(20, 116, 392, 30, "\xE9\x9F\xB3\xE9\x87\x8F", "VOLUME", 0x457B9Du);
+    /* label left, value right 鈥?the old layout drew the value inside the
+       same box as the label, which is why the screen looked garbled */
+    draw_button(20, 34, 392, 28, "\xE6\x96\x87\xE5\xAD\x97\xE9\x80\x9F\xE5\xBA\xA6", "TEXT SPEED", 0x457B9Du);
+    draw_str(SPEED_CJK[s_set_speed], 356, 40, 0xFFD166u);
+    if (!s_font_w) draw_ascii8(376, 42, "SPD", 1, 0xFFD166u);
+    draw_button(20, 68, 392, 28, "\xE8\x87\xAA\xE5\x8A\xA8\xE6\x92\xAD\xE6\x94\xBE", "AUTO MODE", 0x457B9Du);
+    draw_str(AUTO_CJK[s_set_auto], 356, 74, 0xFFD166u);
+    if (!s_font_w) draw_ascii8(376, 76, "AUT", 1, 0xFFD166u);
+    draw_button(20, 102, 392, 28, "\xE9\x9F\xB3\xE9\x87\x8F", "VOLUME", 0x457B9Du);
     {
         int i;
         for (i = 0; i < 8; i++) {
             uint32_t c = i < (int)s_set_volume ? 0x6FCF97u : 0x30343Bu;
-            lfill_rect(320 + i * 12, 124, 8, 18, c);
+            lfill_rect(340 + i * 9, 108, 6, 16, c);
         }
     }
-    draw_button(20, 154, 392, 30, "\xE5\x85\xA8\xE9\x83\xA8\xE8\xA7\xA3\xE9\x94\x81", "UNLOCK ALL", 0x457B9Du);
-    draw_str(s_set_unlock ? "\xE5\xBC\x80" : "\xE5\x85\xB3",   /* 开 / 关 */
-             330, 162, s_set_unlock ? 0x6FCF97u : 0x8D99Aeu);
-    if (!s_font_w) draw_ascii8(330, 164, s_set_unlock ? "ON" : "OFF", 1,
+    draw_button(20, 136, 392, 28, "\xE5\x85\xA8\xE9\x83\xA8\xE8\xA7\xA3\xE9\x94\x81", "UNLOCK ALL", 0x457B9Du);
+    draw_str(s_set_unlock ? "\xE5\xBC\x80" : "\xE5\x85\xB3",
+             356, 142, s_set_unlock ? 0x6FCF97u : 0x8D99Aeu);
+    if (!s_font_w) draw_ascii8(376, 144, s_set_unlock ? "ON" : "OFF", 1,
                                0xFFD166u);
-    draw_ascii8(20, 200, "tap row = change   vol = back", 1, 0x8D99Aeu);
+    draw_button(20, 170, 392, 28, "\xE8\xAF\xAD\xE9\x9F\xB3", "VOICE", 0x457B9Du);
+    draw_str(s_set_voice ? "\xE5\xBC\x80" : "\xE5\x85\xB3",
+             356, 176, s_set_voice ? 0x6FCF97u : 0x8D99Aeu);
+    if (!s_font_w) draw_ascii8(376, 178, s_set_voice ? "ON" : "OFF", 1,
+                               0xFFD166u);
+    draw_ascii8(20, 208, "tap row = change   vol = back", 1, 0x8D99Aeu);
 }
 
 static void settings_hit(int lx, int ly)
 {
     (void)lx;
-    if (ly >= 40 && ly < 70) s_set_speed = (uint8_t)((s_set_speed + 1) & 3);
-    else if (ly >= 78 && ly < 108) s_set_auto = (uint8_t)((s_set_auto + 1) & 3);
-    else if (ly >= 116 && ly < 146) s_set_volume = (uint8_t)((s_set_volume + 1) % 9);
-    else if (ly >= 154 && ly < 184) s_set_unlock = (uint8_t)!s_set_unlock;
+    if (ly >= 34 && ly < 66) s_set_speed = (uint8_t)((s_set_speed + 1) & 3);
+    else if (ly >= 68 && ly < 100) s_set_auto = (uint8_t)((s_set_auto + 1) & 3);
+    else if (ly >= 102 && ly < 134) s_set_volume = (uint8_t)((s_set_volume + 1) % 9);
+    else if (ly >= 136 && ly < 168) s_set_unlock = (uint8_t)!s_set_unlock;
+    else if (ly >= 170 && ly < 202) s_set_voice = (uint8_t)!s_set_voice;
     else return;
     settings_save();
 }
@@ -2289,7 +2301,7 @@ void hb_raw_frame(const hb_spoint_t *touch)
     }
     s_prev_ffwd = ffwd;
 
-    /* VOL_DOWN edge: scene = rewind one line (快退); lists = back out */
+    /* VOL_DOWN edge: scene = rewind one line (蹇€€); lists = back out */
     if (back && !s_prev_back) {
         switch (s_mode) {
         case MODE_SCENE:
