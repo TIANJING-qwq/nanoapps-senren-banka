@@ -1906,7 +1906,7 @@ static void cgview_hit(int lx, int ly)
    u16 off, u16 len }, then edges { u16 from, u16 to }, then route table,
    then a utf-8 blob holding titles and route names. */
 #define CHART_MAX   24576u
-#define CHART_HDR   16u
+#define CHART_HDR   12u
 #define CHART_REC   12u
 #define CHART_TOP   26
 #define CHART_BOT   206
