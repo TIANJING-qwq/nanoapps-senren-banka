@@ -82,7 +82,14 @@ def extract(path: Path):
             ch = fname.split(".")[0] if "." in fname else fname
             raw.append((pos, ("C", ch, fname)))
         elif cls == "event":
-            raw.append((pos, ("E", fname)))          # full-screen event CG
+            # class "event" carries both real CGs (ev701aa) and effect
+            # images (ef_丸 / ef_爪); only evNNN names are event CGs
+            if re.match(r"^ev\d", fname):
+                raw.append((pos, ("E", fname)))
+        elif cls == "centerlayer":
+            # center layer = the SD CGs (sd001aa ...) shown in the scene
+            if re.match(r"^sd\d", fname):
+                raw.append((pos, ("E", fname)))
 
     # ---- dialogue blocks: line `"<sp>",` + line `void,` + line `"<tx>",` ---
     p = 0

@@ -20,7 +20,7 @@ for f in files:
             break
         elif op == 1:
             pc += 4
-        elif op in (2, 5):
+        elif op in (2, 5, 12):
             pc += 2 + struct.unpack_from("<H", b, pc)[0]
         elif op == 3:
             pc += 2

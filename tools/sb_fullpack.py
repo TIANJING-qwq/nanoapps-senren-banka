@@ -34,7 +34,7 @@ for f in [src / "script.bin"] + sorted((src / "ch").glob("*.bin")):
                 pc += 1
             elif op == 1:
                 pc += 4
-            elif op in (2, 5):
+            elif op in (2, 5, 12):
                 _, pc = rd_str(b, pc)
             elif op == 3:
                 pc += 2

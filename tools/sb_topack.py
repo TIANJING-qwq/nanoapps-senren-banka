@@ -23,6 +23,7 @@ outdir.mkdir(parents=True, exist_ok=True)
 
 OP_END, OP_LABEL, OP_BG, OP_SPR, OP_SPRCLR, OP_BGM, OP_SAY, OP_CHOICE, \
     OP_JUMP, OP_WAIT, OP_NEXT, OP_VOICE = range(12)
+OP_CG = 0x0C          # str name: full-screen event CG (cg/<name>.bin)
 
 chapters = {}
 order = []
@@ -99,6 +100,39 @@ if sprn_path.exists():
             spr_of[p[0]] = p[1]
     print(f"spr_names: {len(spr_of)} characters")
 
+# event CG assets: sd001aa -> cg07 (imported PNGs) and ev701aa -> ev701a
+# (composed layered CGs), matched by their three-digit number.
+cg_sd_of = {}
+cg_ev_by_num = {}
+for _n in ("cg_names.tsv", "cg_ev_names.tsv"):
+    _p = Path("NanoApps/build/sb_full") / _n
+    if not _p.exists():
+        _p = Path("NanoApps/build") / _n
+    if not _p.exists():
+        continue
+    for ln in _p.read_text(encoding="utf-8").splitlines():
+        q = ln.split("\t")
+        if len(q) != 2:
+            continue
+        if _n == "cg_names.tsv":
+            cg_sd_of[q[0]] = q[1]
+        else:
+            m = re.match(r"ev(\d{3})", q[0])
+            if m:
+                cg_ev_by_num.setdefault(m.group(1), q[0])
+print(f"cg assets: {len(cg_sd_of)} sd, {len(cg_ev_by_num)} ev chapters")
+
+
+def cg_asset(name):
+    """Map a scenario CG reference to the asset name we actually ship."""
+    if name.startswith("sd"):
+        return cg_sd_of.get(name)
+    if name.startswith("ev"):
+        m = re.match(r"ev(\d{3})", name)
+        if m:
+            return cg_ev_by_num.get(m.group(1))
+    return None
+
 # Execution graph (scenelist order + choices + per-label events)
 FLOW = {}
 flow_path = Path("NanoApps/build/sb_flow.json")
@@ -120,13 +154,15 @@ if EVENTS:
         if base not in events:
             events[base] = []
             order.append(base)
-        if p[1] == "B":
-            events[base].append(("B", p[2]))
-        elif p[1] == "C":
-            events[base].append(("C", p[2], p[3] if len(p) > 3 else ""))
-        elif p[1] == "S":
-            events[base].append(("S", p[2], p[3] if len(p) > 3 else "",
-                                 p[4] if len(p) > 4 else ""))
+        if p[2] == "B":
+            events[base].append(("B", p[3]))
+        elif p[2] == "C":
+            events[base].append(("C", p[3], p[4] if len(p) > 4 else ""))
+        elif p[2] == "E":
+            events[base].append(("E", p[3]))
+        elif p[2] == "S":
+            events[base].append(("S", p[3], p[4] if len(p) > 4 else "",
+                                 p[5] if len(p) > 5 else ""))
     print(f"source: sb_events.tsv ({len(events)} chapters, "
           f"{sum(len(v) for v in events.values())} events)")
 
@@ -241,6 +277,7 @@ def build_from_flow(ci, base, segs, next_no):
         cur_bg = ""
         pending = ""
         cur_spr = ""
+        cur_cg = ""
         if sg["kind"] == "choice":
             opts = [(txt, seg_label.get(ti, -1))
                     for txt, ti in sg.get("choice_idx", [])
@@ -259,6 +296,20 @@ def build_from_flow(ci, base, segs, next_no):
                 bb = bg_names.get(e[1])
                 if bb:
                     pending = bb
+                continue
+            if e[0] == "E":
+                # event CG: full-screen art replaces the scene. Hide sprites
+                # and drop bg/sprite tracking so the next B/C re-emits.
+                asset = cg_asset(e[1])
+                if asset and asset != cur_cg:
+                    if pending and pending != cur_bg:
+                        b += bytes([OP_BG]) + s_str(pending.encode())
+                    b += bytes([OP_SPRCLR, 0xFF])
+                    b += bytes([OP_CG]) + s_str(asset.encode())
+                    cur_cg = asset
+                    cur_spr = ""
+                    cur_bg = ""
+                    pending = ""
                 continue
             if e[0] == "C":
                 sp = spr_of.get(e[1]) or spr_of.get(e[1] + "a")
