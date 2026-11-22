@@ -305,8 +305,11 @@ def build_from_flow(ci, base, segs, next_no):
                 b += struct.pack("<I", tl) + s_str(tb)
             bodies.append(bytes(b))
             continue
+        hold_bg = False       # a CG must survive following bg events
         for e in sg["events"]:
             if e[0] == "B":
+                if hold_bg:
+                    continue
                 bb = bg_names.get(e[1])
                 if bb:
                     pending = bb
@@ -324,6 +327,7 @@ def build_from_flow(ci, base, segs, next_no):
                     cur_spr = ""
                     cur_bg = ""
                     pending = ""
+                    hold_bg = True
                 continue
             if e[0] == "C":
                 sp = spr_of.get(e[1]) or spr_of.get(e[1] + "a")
