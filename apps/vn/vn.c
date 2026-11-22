@@ -2160,37 +2160,22 @@ static void compose_flow(void)
         else
             draw_ascii8(x + 6, y + 2, buf, 1, 0xF1FAEEu);
     }
-    /* ---- debug overlay: proves what the touch layer delivers ---- */
-    lfill_rect(0, SCR_H - 12, SCR_W, 12, 0x101820u);
-    /* red square = the point the engine thinks the finger is at */
-    lfill_rect((int)s_dbg_lx - 3, (int)s_dbg_ly - 3, 7, 7, 0xFF3B30u);
-    /* green bar width encodes the accumulated drag distance */
+    /* paging buttons (drag scrolling is unusable on this touchscreen) */
     {
-        int w = (int)s_dbg_moved;
-        if (w > 200) w = 200;
-        lfill_rect(2, SCR_H - 10, w, 6, 0x30D158u);
-    }
-    /* white bar = 30 px tap threshold reference */
-    lfill_rect(2 + 30, SCR_H - 10, 1, 6, 0xFFFFFFu);
-    /* cyan dot: finger is down;  yellow dot: press landed in the tab strip */
-    if (s_dbg_down) lfill_rect(210, SCR_H - 10, 6, 6, 0x64D2FFu);
-    if (s_dbg_tab)  lfill_rect(220, SCR_H - 10, 6, 6, 0xFFD60Au);
-    /* magenta: the node under the finger, i.e. what a tap would jump to */
-    {
-        uint16_t b0, n0, k;
-        chart_range(&b0, &n0);
-        for (k = 0; k < n0; k++) {
-            const uint8_t *rr = chart_rec((uint16_t)(b0 + k));
-            int nx = (int)chart_u16(rr) + s_chart_dx;
-            int ny = (int)chart_u16(rr + 2) + CHART_TOP -
-                     s_chart_scroll[s_chart_route];
-            int nw = (rr[4] == 0) ? CHART_W_CH : CHART_W;
-            if ((int)s_dbg_lx >= nx && (int)s_dbg_lx < nx + nw &&
-                (int)s_dbg_ly >= ny && (int)s_dbg_ly < ny + 18) {
-                lrect_outline(nx, ny, nw, 18, 2, 0xFF2D95u);
-                break;
-            }
+        int16_t mx = chart_max_scroll();
+        int page = (CHART_BOT - CHART_TOP) - 26;
+        int cur = s_chart_scroll[s_chart_route];
+        int hw = SCR_W / 2;
+        lfill_rect(2, CHART_BOT + 2, hw - 4, 12, cur > 0 ? 0x2A4A6Au : 0x1A2432u);
+        lfill_rect(hw + 2, CHART_BOT + 2, hw - 4, 12,
+                   cur < mx ? 0x2A4A6Au : 0x1A2432u);
+        if (s_font_w) {
+            draw_str("上页", 8, CHART_BOT + 2, cur > 0 ? 0xF1FAEEu : 0x55607Au);
+            draw_str("下页", hw + 12, CHART_BOT + 2,
+                     cur < mx ? 0xF1FAEEu : 0x55607Au);
         }
+        /* position indicator: which screen of this route */
+        (void)page;
     }
     (void)chart_max_scroll;
 }
@@ -2201,6 +2186,17 @@ static void flow_hit(int lx, int ly)
     int t;
 
     if (!s_chart_ok) return;
+    /* paging strip at the bottom */
+    if (ly >= CHART_BOT) {
+        int mx = (int)chart_max_scroll();
+        int page = (CHART_BOT - CHART_TOP) - 26;
+        int v = (int)s_chart_scroll[s_chart_route];
+        if (lx < SCR_W / 2) v -= page; else v += page;
+        if (v < 0) v = 0;
+        if (v > mx) v = mx;
+        s_chart_scroll[s_chart_route] = (int16_t)v;
+        return;
+    }
     /* route tab? */
     if (ly < CHART_TABH + 2) {
         t = (lx - 4) / 61;
@@ -2623,60 +2619,10 @@ void hb_raw_frame(const hb_spoint_t *touch)
     }
     s_prev_back = back;
 
-    /* chart debug: remember what the engine actually receives */
-    s_dbg_lx = lx;
-    s_dbg_ly = ly;
-    s_dbg_down = (touch && touch->down) ? 1u : 0u;
-    s_dbg_moved = s_chart_moved;
-    s_dbg_tab = (ly < CHART_TABH + 4) ? 1u : 0u;
-
-    /* chart screen: drag to scroll, short tap to jump */
-    if (s_mode == MODE_FLOW) {
-        if (touch && touch->down) {
-            if (!s_prev_down) {
-                s_chart_drag = ly;
-                s_chart_moved = 0;
-                s_chart_started = 0;
-                s_chart_tapx = lx;
-                s_chart_tapy = ly;
-                /* route tabs must react on press, not on release: a drag
-                   down the content area must never swallow a tab tap */
-                if (ly < CHART_TABH + 4) flow_hit(lx, ly);
-            } else {
-                int d = (int)ly - (int)s_chart_drag;
-                if (d > 60 || d < -60) {
-                    /* A jump this large is not a finger movement: the first
-                       reported position can be stale/garbage. Re-anchor the
-                       drag origin instead of counting it as travel, which is
-                       what used to saturate the tap rejection. */
-                    s_chart_drag = ly;
-                    s_chart_tapx = lx;
-                    s_chart_tapy = ly;
-                    s_chart_moved = 0;
-                    s_chart_started = 0;
-                } else if (d != 0) {
-                    int mx = (int)chart_max_scroll();
-                    int v = (int)s_chart_scroll[s_chart_route] - d;
-                    if (v < 0) v = 0;
-                    if (v > mx) v = mx;
-                    s_chart_scroll[s_chart_route] = (int16_t)v;
-                    s_chart_moved = (int16_t)(s_chart_moved +
-                                              (d < 0 ? -d : d));
-                    if (s_chart_moved > 24) s_chart_started = 1;
-                    s_chart_drag = ly;
-                    s_need_full = 1;
-                }
-            }
-        } else if (s_prev_down) {
-            int tdx = (int)lx - (int)s_chart_tapx;
-            int tdy = (int)ly - (int)s_chart_tapy;
-            if (tdx < 0) tdx = -tdx;
-            if (tdy < 0) tdy = -tdy;
-            if (tdx + tdy < 30) flow_hit(s_chart_tapx, s_chart_tapy);
-        }
-    }
-
     switch (s_mode) {
+    case MODE_FLOW:
+        if (click) { flow_hit(lx, ly); s_need_full = 1; }
+        break;
     case MODE_TITLE:
         if (click) title_hit(lx, ly);
         break;
@@ -2694,8 +2640,6 @@ void hb_raw_frame(const hb_spoint_t *touch)
         break;
     case MODE_CGVIEW:
         if (click) cgview_hit(lx, ly);
-        break;
-    case MODE_FLOW:
         break;
     case MODE_CHSEL:
         if (click) chsel_hit(lx, ly);
