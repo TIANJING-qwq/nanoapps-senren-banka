@@ -2219,8 +2219,8 @@ void hb_raw_frame(const hb_spoint_t *touch)
             /* Ultra conservative: clip length + 50% + 2 s, and never less
                than 3 s between two playbacks. Frequent pthread_create on a
                single static descriptor is what reboots the device. */
-            hold = hold + hold / 2u + 60u;
-            if (hold < 90u) hold = 90u;      /* ~3 s floor */
+            hold = hold * 2u + 120u;
+            if (hold < 240u) hold = 240u;    /* ~8 s floor */
             s_audio_until = s_ticks + hold;
         }
         if (s_dbg_calls < 9999) s_dbg_calls++;
