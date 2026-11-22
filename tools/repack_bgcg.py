@@ -16,25 +16,24 @@ W, H = 432, 240
 
 
 def cover(im):
-    """Landscape art: cover-fill. Portrait/odd art: fit inside and letterbox,
-    otherwise it degenerates into a thin vertical strip."""
+    """The Mi Band pack's art is 336x480 PORTRAIT (made for a vertical watch
+    screen). Our screen is 432x240 landscape, so fit by height, centre it, and
+    fill the sides instead of cropping it into a thin vertical strip."""
     im = im.convert("RGB")
-    ar = im.width / im.height
-    if False:                                   # keep plain cover everywhere
-        sc = min(W / im.width, H / im.height)
-        nw, nh = max(1, round(im.width * sc)), max(1, round(im.height * sc))
-        out = Image.new("RGB", (W, H), (0, 0, 0))
-        out.paste(im.resize((nw, nh), Image.LANCZOS),
-                  ((W - nw) // 2, (H - nh) // 2))
-        return out
-    sc = max(W / im.width, H / im.height)
-    nw, nh = max(W, round(im.width * sc)), max(H, round(im.height * sc))
-    im = im.resize((nw, nh), Image.LANCZOS)
-    return im.crop(((nw - W) // 2, (nh - H) // 2,
-                    (nw - W) // 2 + W, (nh - H) // 2 + H))
+    sc = H / im.height
+    nw = max(1, round(im.width * sc))
+    im = im.resize((nw, H), Image.LANCZOS)
+    out = Image.new("RGB", (W, H), (0, 0, 0))
+    if nw <= W:
+        out.paste(im, ((W - nw) // 2, 0))
+    else:
+        out.paste(im.crop(((nw - W) // 2, 0, (nw - W) // 2 + W, H)), (0, 0))
+    return out
 
 
-def pack0(im):
+def pack0(im, rotate=False):
+    if rotate:
+        im = im.rotate(-90, expand=True)
     im = cover(im)
     px = im.load()
     col = bytearray(W * H * 2)
@@ -52,6 +51,7 @@ def pack0(im):
 def main():
     z = zipfile.ZipFile(ZIP)
     for src, dst in (("bcgi", "bg"), ("evig", "cg")):
+        rot = (dst == "cg")          # only the CGs are portrait
         n = 0
         out = OUT / dst
         out.mkdir(parents=True, exist_ok=True)
@@ -63,7 +63,7 @@ def main():
                 im = Image.open(io.BytesIO(z.read(i.filename)))
             except Exception:
                 continue
-            (out / (name + ".bin")).write_bytes(pack0(im))
+            (out / (name + ".bin")).write_bytes(pack0(im, rot))
             n += 1
         print(f"{src}: {n} -> {out} (fmt 0, cover)")
     maps = dict(l.split("\t") for l in
