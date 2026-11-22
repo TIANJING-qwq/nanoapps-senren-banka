@@ -1931,6 +1931,8 @@ static uint16_t s_chart_nroute;
 static int16_t  s_chart_scroll[CHART_TABS];
 static uint8_t  s_chart_started;
 static int16_t  s_chart_dx;
+static int16_t  s_dbg_lx, s_dbg_ly, s_dbg_moved;
+static uint8_t  s_dbg_down, s_dbg_tab;
 static int16_t  s_chart_drag;
 static int16_t  s_chart_moved;
 static int16_t  s_chart_tapx;
@@ -2157,6 +2159,38 @@ static void compose_flow(void)
             draw_str(buf, x + 6, y + 1, 0xF1FAEEu);
         else
             draw_ascii8(x + 6, y + 2, buf, 1, 0xF1FAEEu);
+    }
+    /* ---- debug overlay: proves what the touch layer delivers ---- */
+    lfill_rect(0, SCR_H - 12, SCR_W, 12, 0x101820u);
+    /* red square = the point the engine thinks the finger is at */
+    lfill_rect((int)s_dbg_lx - 3, (int)s_dbg_ly - 3, 7, 7, 0xFF3B30u);
+    /* green bar width encodes the accumulated drag distance */
+    {
+        int w = (int)s_dbg_moved;
+        if (w > 200) w = 200;
+        lfill_rect(2, SCR_H - 10, w, 6, 0x30D158u);
+    }
+    /* white bar = 30 px tap threshold reference */
+    lfill_rect(2 + 30, SCR_H - 10, 1, 6, 0xFFFFFFu);
+    /* cyan dot: finger is down;  yellow dot: press landed in the tab strip */
+    if (s_dbg_down) lfill_rect(210, SCR_H - 10, 6, 6, 0x64D2FFu);
+    if (s_dbg_tab)  lfill_rect(220, SCR_H - 10, 6, 6, 0xFFD60Au);
+    /* magenta: the node under the finger, i.e. what a tap would jump to */
+    {
+        uint16_t b0, n0, k;
+        chart_range(&b0, &n0);
+        for (k = 0; k < n0; k++) {
+            const uint8_t *rr = chart_rec((uint16_t)(b0 + k));
+            int nx = (int)chart_u16(rr) + s_chart_dx;
+            int ny = (int)chart_u16(rr + 2) + CHART_TOP -
+                     s_chart_scroll[s_chart_route];
+            int nw = (rr[4] == 0) ? CHART_W_CH : CHART_W;
+            if ((int)s_dbg_lx >= nx && (int)s_dbg_lx < nx + nw &&
+                (int)s_dbg_ly >= ny && (int)s_dbg_ly < ny + 18) {
+                lrect_outline(nx, ny, nw, 18, 2, 0xFF2D95u);
+                break;
+            }
+        }
     }
     (void)chart_max_scroll;
 }
@@ -2588,6 +2622,13 @@ void hb_raw_frame(const hb_spoint_t *touch)
         }
     }
     s_prev_back = back;
+
+    /* chart debug: remember what the engine actually receives */
+    s_dbg_lx = lx;
+    s_dbg_ly = ly;
+    s_dbg_down = (touch && touch->down) ? 1u : 0u;
+    s_dbg_moved = s_chart_moved;
+    s_dbg_tab = (ly < CHART_TABH + 4) ? 1u : 0u;
 
     /* chart screen: drag to scroll, short tap to jump */
     if (s_mode == MODE_FLOW) {
