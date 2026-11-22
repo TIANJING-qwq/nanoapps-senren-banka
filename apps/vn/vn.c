@@ -2585,10 +2585,10 @@ void hb_raw_frame(const hb_spoint_t *touch)
                 int d = (int)ly - (int)s_chart_drag;
                 if (d != 0) {
                     int mx = (int)chart_max_scroll();
-                    int v = (int)s_chart_scroll - d;
+                    int v = (int)s_chart_scroll[s_chart_route] - d;
                     if (v < 0) v = 0;
                     if (v > mx) v = mx;
-                    s_chart_scroll = (int16_t)v;
+                    s_chart_scroll[s_chart_route] = (int16_t)v;
                     s_chart_moved = (int16_t)(s_chart_moved +
                                               (d < 0 ? -d : d));
                     s_chart_drag = ly;
