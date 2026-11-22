@@ -43,10 +43,10 @@ def main():
         tag = "s" + m.group(1)
         ours = [s for s in segs if s.get("kind") == "choice"]
         theirs = chart.get(tag, [])
-        if not ours or len(ours) != len(theirs):
-            if ours:
-                skipped += len(ours)
+        if not ours or not theirs:
             continue
+        # NOTE: when the counts differ we still translate the overlapping
+        # options positionally instead of dropping the chapter to Japanese.
         for seg, cn in zip(ours, theirs):
             cur = seg.get("choices") or []
             n = min(len(cur), len(cn))
