@@ -26,27 +26,30 @@ def cjk(size):
 def load():
     b = CHART.read_bytes()
     assert b[:4] == b"VNCH", b[:4]
-    ver, n, ne, nr = struct.unpack_from("<HHHH", b, 4)
-    nodes = []
-    off = 12
-    for i in range(n):
-        x, y, t, rt, ch, o, ln = struct.unpack_from("<hhBBHHH", b, off)
-        off += 12
-        nodes.append({"x": x, "y": y, "type": t, "chapter": ch, "off": o, "len": ln})
-    edges = []
-    for i in range(ne):
-        a, bb = struct.unpack_from("<HH", b, off)
-        off += 4
-        edges.append((a, bb))
+    ver, nr = struct.unpack_from("<HH", b, 4)
     routes = []
     for i in range(nr):
-        o, ln = struct.unpack_from("<HH", b, off)
-        off += 4
-        routes.append((o, ln))
-    blob = b[off:]
+        off, ln, nb, nc, eb, ec = struct.unpack_from("<HHHHHH", b, 8 + i * 12)
+        routes.append({"name_off": off, "name_len": ln, "node_base": nb,
+                       "node_count": nc, "edge_base": eb, "edge_count": ec})
+    noff = 8 + nr * 12
+    total = max(r["node_base"] + r["node_count"] for r in routes)
+    eoff = noff + total * 12
+    etotal = max(r["edge_base"] + r["edge_count"] for r in routes)
+    boff = eoff + etotal * 4
+    nodes = []
+    for i in range(total):
+        x, y, t, rt, ch, o, ln = struct.unpack_from("<hhBBHHH", b, noff + i * 12)
+        nodes.append({"x": x, "y": y, "type": t, "route": rt, "chapter": ch,
+                      "off": o, "len": ln})
+    edges = [struct.unpack_from("<HH", b, eoff + i * 4) for i in range(etotal)]
+    blob = b[boff:]
     for nd in nodes:
         nd["title"] = blob[nd["off"]:nd["off"] + nd["len"]].decode("utf-8", "replace")
-    return nodes, edges, routes
+    for r in routes:
+        r["name"] = blob[r["name_off"]:r["name_off"] + r["name_len"]].decode(
+            "utf-8", "replace")
+    return routes, nodes, edges
 
 
 def draw_view(nodes, edges, scroll, draw, font, small):
@@ -73,14 +76,19 @@ def draw_view(nodes, edges, scroll, draw, font, small):
 
 
 def main():
-    nodes, edges, routes = load()
-    height = max(n["y"] for n in nodes) + 40
-    print(f"{len(nodes)} nodes, {len(edges)} edges, height {height}px, "
-          f"{len(routes)} routes")
+    routes, nodes, edges = load()
+    print(f"{len(nodes)} nodes, {len(edges)} edges, {len(routes)} routes")
     font, small = cjk(13 * SCALE // 2), cjk(8)
     pages = []
-    scroll = 0
-    while scroll < height - BOT:
+    for ri, scroll in ((0, 0), (0, 130), (1, 0)):
+        if ri >= len(routes):
+            break
+        r = routes[ri]
+        nb, nc = r["node_base"], r["node_count"]
+        eb, ec = r["edge_base"], r["edge_count"]
+        sub_nodes = nodes[nb:nb + nc]
+        sub_edges = [(a - nb, b - nb) for a, b in edges[eb:eb + ec]
+                     if nb <= a < nb + nc and nb <= b < nb + nc]
         img = Image.new("RGB", (W * SCALE, H * SCALE), (11, 19, 43))
         d = ImageDraw.Draw(img)
 
@@ -98,13 +106,17 @@ def main():
             def text(self, xy, s, **kw):
                 d.text((xy[0] * SCALE, xy[1] * SCALE), s, **kw)
 
-        draw_view(nodes, edges, scroll, D(), font, small)
-        d.text((10 * SCALE, 3 * SCALE), "流程图  FLOWCHART", font=font,
-               fill=(241, 250, 238))
+        draw_view(sub_nodes, sub_edges, scroll, D(), font, small)
+        for ti, rr in enumerate(routes):
+            tx = 4 + ti * 61
+            on = ti == ri
+            d.rectangle([tx * SCALE, 2 * SCALE, (tx + 58) * SCALE,
+                         (2 + 18) * SCALE],
+                        fill=(232, 153, 141) if on else (29, 53, 87),
+                        outline=(255, 233, 228) if on else (69, 123, 157))
+            d.text(((tx + 6) * SCALE, 4 * SCALE), rr["name"], font=font,
+                   fill=(27, 36, 51) if on else (241, 250, 238))
         pages.append(img)
-        scroll += (BOT - TOP)
-        if len(pages) >= 6:
-            break
     out = Image.new("RGB", (W * SCALE * len(pages) + 10 * (len(pages) - 1),
                             H * SCALE), (0, 0, 0))
     for i, p in enumerate(pages):

@@ -1901,34 +1901,45 @@ static void cgview_hit(int lx, int ly)
 
 /* ------------------------------------------------------------ flowchart ---- */
 
-/* chart.idx ("VNCH"): u16 ver, u16 nodes, u16 edges, u16 routes, then
-   12-byte node records { i16 x, i16 y, u8 type, u8 route, u16 chapter,
-   u16 off, u16 len }, then edges { u16 from, u16 to }, then route table,
-   then a utf-8 blob holding titles and route names. */
-#define CHART_MAX   24576u
-#define CHART_HDR   12u
-#define CHART_REC   12u
-#define CHART_TOP   26
-#define CHART_BOT   206
+/* chart.idx ("VNCH" v2): one layout per route tab.
+     4  "VNCH"
+     2  u16 ver
+     2  u16 n_routes
+    12*n  route recs { u16 name_off, u16 name_len, u16 node_base,
+                       u16 node_count, u16 edge_base, u16 edge_count }
+    12*N  node recs  { i16 x, i16 y, u8 type, u8 route, u16 chapter,
+                       u16 off, u16 len }
+     4*E  edges      { u16 from, u16 to }   (global node indices)
+          blob       utf-8 titles then route names                    */
+#define CHART_MAX    24576u
+#define CHART_HDR    8u
+#define CHART_RREC   12u
+#define CHART_NREC   12u
+#define CHART_TABS   7
+#define CHART_TABH   18
+#define CHART_TOP    26
+#define CHART_BOT    206
+#define CHART_W      140          /* node box width, keep in sync with tool */
+#define CHART_W_CH   260
 
 static uint8_t  s_chart_buf[CHART_MAX];
+static uint8_t  s_chart_ok;
+static uint8_t  s_chart_route;
 static uint16_t s_chart_nodes;
 static uint16_t s_chart_edges;
-static uint8_t  s_chart_ok;
-static int16_t  s_chart_scroll;
-static int16_t  s_chart_drag;      /* last touch y while a drag is in flight */
-static int16_t  s_chart_moved;     /* total travel, to tell drag from tap    */
+static uint16_t s_chart_nroute;
+static int16_t  s_chart_scroll[CHART_TABS];
+static int16_t  s_chart_drag;
+static int16_t  s_chart_moved;
 static int16_t  s_chart_tapx;
 static int16_t  s_chart_tapy;
+static uint32_t s_chart_node_off;
+static uint32_t s_chart_edge_off;
+static uint32_t s_chart_blob_off;
 
-static const uint8_t *chart_rec(uint16_t i)
+static uint16_t chart_u16(const uint8_t *q)
 {
-    return s_chart_buf + CHART_HDR + (uint32_t)i * CHART_REC;
-}
-
-static uint16_t chart_u16(const uint8_t *p)
-{
-    return (uint16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
+    return (uint16_t)((uint16_t)q[0] | ((uint16_t)q[1] << 8));
 }
 
 static uint8_t chart_load(void)
@@ -1940,48 +1951,62 @@ static uint8_t chart_load(void)
     if (got < CHART_HDR || s_chart_buf[0] != 'V' || s_chart_buf[1] != 'N' ||
         s_chart_buf[2] != 'C' || s_chart_buf[3] != 'H')
         return 0;
-    s_chart_nodes = chart_u16(s_chart_buf + 6);
-    s_chart_edges = chart_u16(s_chart_buf + 8);
-    if (CHART_HDR + (uint32_t)s_chart_nodes * CHART_REC +
-        (uint32_t)s_chart_edges * 4u > got) {
-        s_chart_nodes = 0;
-        s_chart_edges = 0;
-        return 0;
+    s_chart_nroute = chart_u16(s_chart_buf + 6);
+    if (s_chart_nroute == 0 || s_chart_nroute > CHART_TABS) return 0;
+    s_chart_nodes = 0;
+    s_chart_edges = 0;
+    {
+        uint16_t r;
+        for (r = 0; r < s_chart_nroute; r++) {
+            const uint8_t *rec = s_chart_buf + CHART_HDR + (uint32_t)r * CHART_RREC;
+            uint16_t nb = chart_u16(rec + 4);
+            uint16_t nc = chart_u16(rec + 6);
+            uint16_t eb = chart_u16(rec + 8);
+            uint16_t ec = chart_u16(rec + 10);
+            if (nb + nc > s_chart_nodes) s_chart_nodes = (uint16_t)(nb + nc);
+            if (eb + ec > s_chart_edges) s_chart_edges = (uint16_t)(eb + ec);
+        }
     }
+    s_chart_node_off = CHART_HDR + (uint32_t)s_chart_nroute * CHART_RREC;
+    s_chart_edge_off = s_chart_node_off + (uint32_t)s_chart_nodes * CHART_NREC;
+    if (s_chart_edge_off + (uint32_t)s_chart_edges * 4u > got) return 0;
+    s_chart_blob_off = s_chart_edge_off + (uint32_t)s_chart_edges * 4u;
     s_chart_ok = 1;
-    s_chart_scroll = 0;
+    s_chart_route = 0;
+    {
+        int i;
+        for (i = 0; i < CHART_TABS; i++) s_chart_scroll[i] = 0;
+    }
     return 1;
 }
 
-static int16_t chart_max_scroll(void)
+static const uint8_t *chart_rec(uint16_t i)
 {
-    int i, maxy = CHART_BOT + 20;
-    for (i = 0; i < (int)s_chart_nodes; i++) {
-        int y = (int)chart_u16(chart_rec((uint16_t)i) + 2) + 20;
-        if (y > maxy) maxy = y;
-    }
-    return (int16_t)(maxy - CHART_BOT);
+    return s_chart_buf + s_chart_node_off + (uint32_t)i * CHART_NREC;
 }
 
-static uint32_t chart_color(uint8_t type)
+static void chart_range(uint16_t *base, uint16_t *count)
 {
-    switch (type) {
-    case 0:  return 0xE8998Du;        /* chapter header */
-    case 2:  return 0xFFD166u;        /* choice point   */
-    case 3:  return 0x6FCF97u;        /* branch         */
-    default: return 0x457B9Du;        /* scene          */
-    }
+    const uint8_t *rec = s_chart_buf + CHART_HDR +
+                         (uint32_t)s_chart_route * CHART_RREC;
+    if (base) *base = chart_u16(rec + 4);
+    if (count) *count = chart_u16(rec + 6);
 }
 
-/* copy at most maxcp UTF-8 codepoints of a node title into out */
-static void chart_text(const uint8_t *rec, char *out, int maxcp)
+static void chart_erange(uint16_t *base, uint16_t *count)
 {
-    uint16_t off = chart_u16(rec + 8);
-    uint16_t len = chart_u16(rec + 10);
-    uint16_t nroute = chart_u16(s_chart_buf + 10);
-    uint32_t blob = CHART_HDR + (uint32_t)s_chart_nodes * CHART_REC +
-                    (uint32_t)s_chart_edges * 4u + (uint32_t)nroute * 4u;
-    const char *b = (const char *)s_chart_buf + blob + (uint32_t)off;
+    const uint8_t *rec = s_chart_buf + CHART_HDR +
+                         (uint32_t)s_chart_route * CHART_RREC;
+    if (base) *base = chart_u16(rec + 8);
+    if (count) *count = chart_u16(rec + 10);
+}
+
+static void chart_route_name(uint8_t r, char *out, int maxcp)
+{
+    const uint8_t *rec = s_chart_buf + CHART_HDR + (uint32_t)r * CHART_RREC;
+    uint16_t off = chart_u16(rec);
+    uint16_t len = chart_u16(rec + 2);
+    const char *b = (const char *)s_chart_buf + s_chart_blob_off + off;
     int i = 0, n = 0, cp = 0;
     while (i < (int)len && cp < maxcp) {
         unsigned char c = (unsigned char)b[i];
@@ -1995,36 +2020,93 @@ static void chart_text(const uint8_t *rec, char *out, int maxcp)
     out[n] = 0;
 }
 
+static void chart_text(const uint8_t *rec, char *out, int maxcp)
+{
+    uint16_t off = chart_u16(rec + 8);
+    uint16_t len = chart_u16(rec + 10);
+    const char *b = (const char *)s_chart_buf + s_chart_blob_off + off;
+    int i = 0, n = 0, cp = 0;
+    while (i < (int)len && cp < maxcp) {
+        unsigned char c = (unsigned char)b[i];
+        int adv = (c >= 0xF0) ? 4 : (c >= 0xE0) ? 3 : (c >= 0xC0) ? 2 : 1;
+        int k;
+        if (i + adv > (int)len) break;
+        for (k = 0; k < adv; k++) out[n++] = b[i + k];
+        i += adv;
+        cp++;
+    }
+    out[n] = 0;
+}
+
+static int16_t chart_max_scroll(void)
+{
+    uint16_t base, n, i;
+    int maxy = 0;
+    chart_range(&base, &n);
+    for (i = 0; i < n; i++) {
+        int y = (int)chart_u16(chart_rec((uint16_t)(base + i)) + 2) + 20;
+        if (y > maxy) maxy = y;
+    }
+    return (int16_t)(maxy > (CHART_BOT - CHART_TOP) ? maxy - (CHART_BOT - CHART_TOP)
+                                                   : 0);
+}
+
+static uint32_t chart_color(uint8_t type)
+{
+    switch (type) {
+    case 0:  return 0xE8998Du;        /* chapter header */
+    case 2:  return 0xFFD166u;        /* choice point   */
+    case 3:  return 0x6FCF97u;        /* branch         */
+    default: return 0x457B9Du;        /* scene          */
+    }
+}
+
 static void compose_flow(void)
 {
-    int i;
-    char buf[40];
+    uint16_t base, n, eb, ec, i;
+    int16_t scroll;
+    char buf[64];
+    int t;
+
     lfill_rect(0, 0, SCR_W, SCR_H, 0x0B132Bu);
     if (!chart_load()) {
         draw_ascii8(12, 12, "no chart.idx", 2, 0xFF9A9Au);
         return;
     }
-    if (s_font_w)
-        draw_str("\xE6\xB5\x81\xE7\xA8\x8B\xE5\x9B\xBE", 10, 3, 0xF1FAEEu);
-    else
-        draw_ascii8(10, 6, "FLOWCHART", 1, 0xF1FAEEu);
-    draw_ascii8(180, 6, "drag=scroll tap=jump", 1, 0x8D99Aeu);
+    scroll = s_chart_scroll[s_chart_route];
+    if (scroll > chart_max_scroll()) {
+        scroll = chart_max_scroll();
+        s_chart_scroll[s_chart_route] = scroll;
+    }
 
-    /* connectors first so the boxes sit on top */
-    for (i = 0; i < (int)s_chart_edges; i++) {
-        const uint8_t *e = s_chart_buf + CHART_HDR +
-                           (uint32_t)s_chart_nodes * CHART_REC +
-                           (uint32_t)i * 4;
+    /* route tabs */
+    for (t = 0; t < (int)s_chart_nroute && t < CHART_TABS; t++) {
+        int tx = 4 + t * 61, on = (t == (int)s_chart_route);
+        chart_route_name((uint8_t)t, buf, 2);
+        lfill_rect(tx, 2, 58, CHART_TABH, on ? 0xE8998Du : 0x1D3557u);
+        lrect_outline(tx, 2, 58, CHART_TABH, 1, on ? 0xFFE9E4u : 0x457B9Du);
+        if (s_font_w)
+            draw_str(buf, tx + 6, 3, on ? 0x1B2433u : 0xF1FAEEu);
+        else
+            draw_ascii8(tx + 6, 5, buf, 1, on ? 0x1B2433u : 0xF1FAEEu);
+    }
+
+    chart_range(&base, &n);
+    chart_erange(&eb, &ec);
+
+    /* connectors */
+    for (i = 0; i < ec; i++) {
+        const uint8_t *e = s_chart_buf + s_chart_edge_off + (uint32_t)(eb + i) * 4u;
         uint16_t ai = chart_u16(e), bi = chart_u16(e + 2);
         const uint8_t *A, *B;
         int ax, ay, bx, by, k;
         if (ai >= s_chart_nodes || bi >= s_chart_nodes) continue;
         A = chart_rec(ai);
         B = chart_rec(bi);
-        ax = (int)chart_u16(A) + 8;
-        ay = (int)chart_u16(A + 2) + 16 - s_chart_scroll;
-        bx = (int)chart_u16(B) + 8;
-        by = (int)chart_u16(B + 2) - s_chart_scroll;
+        ax = (int)chart_u16(A) + 9;
+        ay = (int)chart_u16(A + 2) + 18 + CHART_TOP - scroll;
+        bx = (int)chart_u16(B) + 9;
+        by = (int)chart_u16(B + 2) + CHART_TOP - scroll;
         if ((ay < CHART_TOP && by < CHART_TOP) ||
             (ay > CHART_BOT && by > CHART_BOT))
             continue;
@@ -2042,36 +2124,48 @@ static void compose_flow(void)
     }
 
     /* node boxes */
-    for (i = 0; i < (int)s_chart_nodes; i++) {
-        const uint8_t *r = chart_rec((uint16_t)i);
+    for (i = 0; i < n; i++) {
+        const uint8_t *r = chart_rec((uint16_t)(base + i));
         int x = (int)chart_u16(r);
-        int y = (int)chart_u16(r + 2) - s_chart_scroll;
+        int y = (int)chart_u16(r + 2) + CHART_TOP - scroll;
         uint8_t type = r[4];
-        int w = (type == 0) ? 200 : 100;
-        int h = 18;
+        int w = (type == 0) ? CHART_W_CH : CHART_W;
         uint32_t col = chart_color(type);
-        if (y + h < CHART_TOP || y > CHART_BOT) continue;
+        if (y + 18 < CHART_TOP || y > CHART_BOT) continue;
         if (x < -w || x > SCR_W) continue;
-        lfill_rect(x, y, w, h, type == 0 ? 0x2A3A5Au : 0x1D3557u);
-        lrect_outline(x, y, w, h, 1, col);
-        lfill_rect(x, y, 2, h, col);
+        lfill_rect(x, y, w, 18, type == 0 ? 0x2A3A5Au : 0x1D3557u);
+        lrect_outline(x, y, w, 18, 1, col);
+        lfill_rect(x, y, 2, 18, col);
         chart_text(r, buf, (w - 12) / (s_font_w ? s_font_w : 8));
         if (s_font_w)
             draw_str(buf, x + 6, y + 1, 0xF1FAEEu);
         else
-            draw_ascii8(x + 6, y + 1, buf, 1, 0xF1FAEEu);
+            draw_ascii8(x + 6, y + 2, buf, 1, 0xF1FAEEu);
     }
+    (void)chart_max_scroll;
 }
 
 static void flow_hit(int lx, int ly)
 {
-    int i;
-    for (i = (int)s_chart_nodes - 1; i >= 0; i--) {
-        const uint8_t *r = chart_rec((uint16_t)i);
+    uint16_t base, n, i;
+    int t;
+
+    if (!s_chart_ok) return;
+    /* route tab? */
+    if (ly < CHART_TABH + 2) {
+        t = (lx - 4) / 61;
+        if (t >= 0 && t < (int)s_chart_nroute && t != (int)s_chart_route) {
+            s_chart_route = (uint8_t)t;
+            s_need_full = 1;
+        }
+        return;
+    }
+    chart_range(&base, &n);
+    for (i = 0; i < n; i++) {
+        const uint8_t *r = chart_rec((uint16_t)(base + (n - 1 - i)));
         int x = (int)chart_u16(r);
-        int y = (int)chart_u16(r + 2) - s_chart_scroll;
-        uint8_t type = r[4];
-        int w = (type == 0) ? 200 : 100;
+        int y = (int)chart_u16(r + 2) + CHART_TOP - s_chart_scroll[s_chart_route];
+        int w = (r[4] == 0) ? CHART_W_CH : CHART_W;
         if (lx >= x && lx < x + w && ly >= y && ly < y + 18) {
             uint16_t ch = chart_u16(r + 6);
             if (load_script_chapter(ch)) {
