@@ -1919,8 +1919,8 @@ static void cgview_hit(int lx, int ly)
 #define CHART_TABH   18
 #define CHART_TOP    26
 #define CHART_BOT    206
-#define CHART_W      140          /* node box width, keep in sync with tool */
-#define CHART_W_CH   260
+#define CHART_W      200          /* node box width, keep in sync with tool */
+#define CHART_W_CH   420
 
 static uint8_t  s_chart_buf[CHART_MAX];
 static uint8_t  s_chart_ok;

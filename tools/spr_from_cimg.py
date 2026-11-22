@@ -54,6 +54,9 @@ def fit(img):
     bb = a.getbbox()
     if bb:
         img = img.crop(bb)
+    # these are complete character artworks: keep the upper body (head +
+    # torso) so the figure is large enough to read on a 160x220 slot
+    img = img.crop((0, 0, img.width, max(1, int(img.height * 0.46))))
     sc = min(W / img.width, H / img.height)
     nw, nh = max(1, round(img.width * sc)), max(1, round(img.height * sc))
     img = img.resize((nw, nh), Image.LANCZOS)
