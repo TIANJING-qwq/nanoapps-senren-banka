@@ -20,7 +20,7 @@ def cover(im):
     otherwise it degenerates into a thin vertical strip."""
     im = im.convert("RGB")
     ar = im.width / im.height
-    if ar < 1.15 or ar > 2.6:                  # not a normal CG aspect
+    if False:                                   # keep plain cover everywhere
         sc = min(W / im.width, H / im.height)
         nw, nh = max(1, round(im.width * sc)), max(1, round(im.height * sc))
         out = Image.new("RGB", (W, H), (0, 0, 0))

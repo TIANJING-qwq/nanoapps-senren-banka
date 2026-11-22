@@ -199,7 +199,7 @@ def build():
             nodes.append({
                 "x": 4 + col * COL_DX, "y": 4 + depth * ROW_DY,
                 "type": t, "route": g,
-                "chapter": script_chapter(it) if t == 0 else script_chapter(it),
+                "chapter": chapter_of(it),
                 "title": title_of(it),
             })
         edge_base = len(edges)
