@@ -21,6 +21,7 @@ OUT = Path(sys.argv[2] if len(sys.argv) > 2 else "NanoApps/build/sb_mb2")
 CHUNK = 500
 
 END, LABEL, BG, SPR, SPRCLR, BGM, SAY, CHOICE, JUMP, WAIT, NEXT, VOICE, CG = range(13)
+JUMPX = 13
 
 
 def s_str(b):
@@ -137,8 +138,20 @@ def build(d, fidx):
                             lab = li + 1 if li + 1 < len(anchors) else 0
                         opts.append((txt, lab))
                 if opts:
+                    # OP_CHOICE only carries same-chapter labels, so any
+                    # option that leaves the chapter is emitted as a
+                    # one-option choice that jumps with OP_JUMPX.
+                    opts = [(o[0], o[1], o[2] if len(o) > 2 else None) for o in opts]
+                    remote = [o for o in opts if o[2] is not None]
+                    if remote:
+                        body += bytes([CHOICE, 1])
+                        body += struct.pack("<I", len(anchors)) + s_str(remote[0][0].encode())
+                        body += bytes([JUMPX]) + struct.pack("<HI", remote[0][2], 0)
+                        bodies.append(bytes(body))
+                        body = bytearray()
+                        break
                     body += bytes([CHOICE, len(opts)])
-                    for txt, lab in opts:
+                    for txt, lab, _ in opts:
                         body += struct.pack("<I", lab) + s_str(txt.encode())
         # continue to the following label, or stop at the end
         if li + 1 < len(anchors):

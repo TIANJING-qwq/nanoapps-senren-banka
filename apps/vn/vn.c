@@ -93,6 +93,7 @@
 #define OP_SPR     0x03   /* u8 slot, u8 pos, u16 nlen, name[]          */
 #define OP_SPRCLR  0x04   /* u8 mask                                    */
 #define OP_BGM     0x05   /* u16 nlen, name[]                           */
+#define OP_JUMPX   0x0D   /* u16 chapter, u32 label: cross-chapter jump */
 #define OP_VOICE   0x0B   /* u16 nlen, name[] 鈥?line voice clip          */
 #define OP_CG      0x0C   /* u16 nlen, name[] — event CG */
 #define OP_SAY     0x06   /* u16 nlen, name[], u16 tlen, text[]         */
@@ -1287,6 +1288,14 @@ static void step(void)
             s_skip = 0;                      /* a choice always stops skip */
             s_mode = MODE_CHOICE;
             return;
+        }
+        case OP_JUMPX: {
+            uint16_t ch = rd_u16();
+            uint32_t lab = rd_u32();
+            if (!load_script_chapter(ch)) { rd_err(0xE7u); return; }
+            s_pc = label_offset(lab);
+            if (s_pc >= s_script_len) { rd_err(0xE8u); return; }
+            break;
         }
         case OP_JUMP: {
             uint32_t off = label_offset(rd_u32());
