@@ -31,7 +31,22 @@ def cover(im):
     return out
 
 
+def key_green(im):
+    """The pack's art sits on a chroma-key green backdrop; leaving it in
+    shows as a bright green frame once the image is rotated/scaled."""
+    im = im.convert("RGB")
+    px = im.load()
+    w, h = im.size
+    for y in range(h):
+        for x in range(w):
+            r, g, b = px[x, y]
+            if g > 90 and g > r + 45 and g > b + 45:
+                px[x, y] = (0, 0, 0)
+    return im
+
+
 def pack0(im, rotate=False):
+    im = key_green(im)
     if rotate:
         im = im.rotate(-90, expand=True)
     im = cover(im)
@@ -51,7 +66,7 @@ def pack0(im, rotate=False):
 def main():
     z = zipfile.ZipFile(ZIP)
     for src, dst in (("bcgi", "bg"), ("evig", "cg")):
-        rot = (dst == "cg")          # only the CGs are portrait
+        rot = True                    # bcgi and evig are both portrait
         n = 0
         out = OUT / dst
         out.mkdir(parents=True, exist_ok=True)
@@ -63,7 +78,7 @@ def main():
                 im = Image.open(io.BytesIO(z.read(i.filename)))
             except Exception:
                 continue
-            just_cg = rot and name.startswith("ev")   # only event art is portrait
+            just_cg = rot and not name.startswith("sd")
             (out / (name + ".bin")).write_bytes(pack0(im, just_cg))
             n += 1
         print(f"{src}: {n} -> {out} (fmt 0, cover)")

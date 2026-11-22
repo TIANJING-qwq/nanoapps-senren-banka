@@ -100,7 +100,7 @@
 #define OP_JUMP    0x08   /* u32 label_id                               */
 #define OP_WAIT    0x09   /* u16 frames                                 */
 
-#define SPR_LIFT    36      /* raise the stand so the head clears the text box */
+#define SPR_LIFT    12      /* raise the stand so the head clears the text box */
 #define SPR_SHIFT   30      /* nudge every stand to the right */
 #define POS_LEFT    0
 #define POS_CENTER  1
