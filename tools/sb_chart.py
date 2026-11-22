@@ -101,15 +101,24 @@ def build():
         m = re.match(r"s(\d{3})", it.get("tag", "") or it["id"])
         return tags.get(m.group(1), 0) if m else 0
 
+    _chap_seq = {}
+
+    def next_chapter_no(item_id):
+        """1-based ordinal of chapter boxes, counted per route in file order"""
+        return _chap_seq.get(item_id, 1)
+
     def title_of(it):
         t = it.get("type")
         if t == "chapter":
-            txt = it.get("name") or (caps.get(it["id"]) or [""])[0]
-            extra = [c for c in (caps.get(it["id"]) or []) if c != txt]
-            body = (txt + " " + " ".join(extra)).strip()
-            body = re.sub(r"^CHAPTER\s*\d+\s*", "", body, flags=re.I)
+            body = (it.get("comment") or "").strip()
+            if not body:
+                txt = it.get("name") or (caps.get(it["id"]) or [""])[0]
+                extra = [c for c in (caps.get(it["id"]) or []) if c != txt]
+                body = (txt + " " + " ".join(extra)).strip()
+            body = re.sub(r"^(CHAPTER|CHAPT)\s*\d*\s*", "", body, flags=re.I)
+            n = next_chapter_no(it["id"])
             # ordinal + name only: the box is 420 px wide, ~20 glyphs
-            return f"第{chapter_of(it) + 1}章 {body}"[:22]
+            return f"第{n}章 {body}".strip()[:22]
         if t == "select" and it.get("comment"):
             return it["comment"]
         cap = caps.get(it["id"])
@@ -168,6 +177,10 @@ def build():
             col, depth = pos[it["id"]]
             t = {"chapter": 0, "section": 1, "select": 2, "branch": 3,
                  "warp": 4}.get(it.get("type"), 1)
+            if it.get("type") == "chapter":
+                _chap_seq.setdefault(it["id"], 1)
+                _chap_seq[it["id"]] = len(
+                    [n2 for n2 in nodes if n2["type"] == 0]) + 1
             base_idx[it["id"]] = len(nodes)
             nodes.append({
                 "x": 4 + col * COL_DX, "y": 4 + depth * ROW_DY,

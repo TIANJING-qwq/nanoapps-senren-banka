@@ -1339,8 +1339,8 @@ static void compose_sprites_clip(int ry0, int ry1)
         int x, y, x0, y0, sy0, sy1;
         if (!s_spr[s].used) continue;
         y0 = SCR_H - s_spr[s].h;
-        if (s_spr[s].pos == POS_LEFT)      x0 = 24;
-        else if (s_spr[s].pos == POS_RIGHT) x0 = SCR_W - s_spr[s].w - 24;
+        if (s_spr[s].pos == POS_LEFT)      x0 = 64;
+        else if (s_spr[s].pos == POS_RIGHT) x0 = SCR_W - s_spr[s].w - 6;
         else                                x0 = (SCR_W - s_spr[s].w) >> 1;
         sy0 = y0 < 0 ? -y0 : 0;
         sy1 = s_spr[s].h;
