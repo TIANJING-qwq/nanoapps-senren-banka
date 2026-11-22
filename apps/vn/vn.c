@@ -100,6 +100,7 @@
 #define OP_JUMP    0x08   /* u32 label_id                               */
 #define OP_WAIT    0x09   /* u16 frames                                 */
 
+#define SPR_LIFT    36      /* raise the stand so the head clears the text box */
 #define POS_LEFT    0
 #define POS_CENTER  1
 #define POS_RIGHT   2
@@ -1338,7 +1339,7 @@ static void compose_sprites_clip(int ry0, int ry1)
     for (s = SPR_SLOTS - 1; s >= 0; s--) {
         int x, y, x0, y0, sy0, sy1;
         if (!s_spr[s].used) continue;
-        y0 = SCR_H - s_spr[s].h;
+        y0 = SCR_H - s_spr[s].h - SPR_LIFT;   /* sit a little higher */
         if (s_spr[s].pos == POS_LEFT)      x0 = 64;
         else if (s_spr[s].pos == POS_RIGHT) x0 = SCR_W - s_spr[s].w - 6;
         else                                x0 = (SCR_W - s_spr[s].w) >> 1;
