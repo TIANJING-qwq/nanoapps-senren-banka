@@ -37,6 +37,15 @@ END, LABEL, BG, SPR, SPRCLR, BGM, SAY, CHOICE, JUMP, WAIT, NEXT, VOICE, CG = \
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
 
 
+VOICE_MAP = {}
+_vm = Path("NanoApps/build/voice_map.tsv")
+if _vm.exists():
+    for _ln in _vm.read_text(encoding="utf-8").splitlines():
+        _q = _ln.split("	")
+        if len(_q) == 3:
+            VOICE_MAP[(_q[0], _q[1])] = _q[2]
+
+
 def s_str(b):
     return struct.pack("<H", len(b)) + b
 
@@ -61,7 +70,7 @@ def sprite_name(c):
     return c.strip()
 
 
-def build(lines):
+def build(lines, fidx=0):
     body = bytearray()
     # NOTE: no OP_LABEL here. A single-label chapter starts straight at its
     # first op (the engine treats OP_LABEL's u32 as a jump target, so emitting
@@ -92,6 +101,9 @@ def build(lines):
         t = v.get("t")
         if t:
             sp = v.get("s") or ""
+            vo = VOICE_MAP.get((str(fidx), k))
+            if vo:
+                body += bytes([VOICE]) + s_str(vo.encode("ascii"))
             body += bytes([SAY]) + s_str(sp.encode()) + s_str(t.encode())
         elif v.get("co"):
             opts = [v.get("c1") or "", v.get("c2") or ""]
@@ -119,7 +131,7 @@ def main():
             d = json.loads(z.read(i.filename).decode("utf-8", "replace"))
         except Exception:
             continue
-        body, split_at = build(d)
+        body, split_at = build(d, idx)
         if split_at is not None:
             blob = pack_chapter([body[:split_at], body[split_at:]])
         else:
