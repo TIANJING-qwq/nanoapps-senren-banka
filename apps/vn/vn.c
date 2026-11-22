@@ -226,7 +226,8 @@ static uint16_t s_dbg_calls;             /* how many play calls happened  */
 /* The iPod audio API owns ONE static descriptor and is single-shot: calling
  * it again before the previous clip finished overlaps/crashes (device
  * reboot). Everything goes through this mutex. */
-static uint32_t s_audio_until;           /* s_ticks when the clip ends    */
+static uint32_t s_audio_until;
+static int audio_busy(void);
 static char     s_last_voice[32];        /* dedupe repeated OP_VOICE      */
 static uint16_t s_pending_ticks;         /* length of the queued clip     */
 
@@ -1205,6 +1206,7 @@ static void step(void)
             rd_str(name, (uint16_t)sizeof name);
             s_voice_ticks = 0;
             if (!name[0]) break;
+            if (audio_busy()) break;      /* never stack clips: reboots */
             if (s_ticks - s_voice_t0 < s_voice_ticks)
                 break;                       /* previous clip still active */
             dl = xstrlen(name);
