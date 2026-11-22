@@ -582,6 +582,8 @@ static void cg_unlock(const char *name);
 static void set_bg(const char *name)
 {
     uint16_t w = 0, h = 0;
+    /* same background already loaded: do NOT re-read the 207 KB file */
+    if (name[0] && s_bg_ok && str_eq(name, s_cur_bg)) return;
     s_bg_ok = 0;
     s_cur_bg[0] = 0;
     s_need_full = 1;
@@ -596,6 +598,8 @@ static void set_bg(const char *name)
 
 static void set_spr(int slot, uint8_t pos, const char *name)
 {
+    if (slot < SPR_SLOTS && s_spr[slot].used && str_eq(name, s_spr[slot].name))
+        return;                       /* already showing this sprite */
     s_need_full = 1;
     if (slot >= SPR_SLOTS) return;
     s_spr[slot].used = 0;
