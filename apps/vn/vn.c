@@ -722,7 +722,9 @@ static uint8_t load_script(void)
 
 /* ---------------------------------------------------- manifests + unlocks -- */
 
-static uint8_t s_cgidx_buf[8 + CG_MAX * (2 + SAVENAME_MAX)];
+static uint8_t s_cgidx_buf[8 + CG_MAX * (3 + SAVENAME_MAX)];
+static uint8_t s_cg_grp[CG_MAX];
+static uint8_t s_cg_tab;
 static uint8_t s_flowidx_buf[8 + FLOW_MAX * (4 + 2 + NAME_MAX)];
 
 static void load_cgidx(void)
@@ -741,6 +743,8 @@ static void load_cgidx(void)
         uint16_t l = (uint16_t)((uint16_t)s_cgidx_buf[off] | ((uint16_t)s_cgidx_buf[off + 1u] << 8));
         uint16_t j;
         off += 2;
+        s_cg_grp[i] = s_cgidx_buf[off];   /* route group */
+        off += 1;
         if (l > SAVENAME_MAX - 1u) l = SAVENAME_MAX - 1u;
         if (off + l > got) break;
         for (j = 0; j < l; j++) s_cg_name[i][j] = (char)s_cgidx_buf[off + j];
@@ -1820,7 +1824,7 @@ static void compose_gallery(void)
     for (i = 0; i < CG_PAGE; i++) {
         uint16_t idx = (uint16_t)(s_cg_page * CG_PAGE + i);
         int gx = 14 + (i % CG_COLS) * (THUMB_W + 16);
-        int gy = 30 + (i / CG_COLS) * (THUMB_H + 18);
+        int gy = 40 + (i / CG_COLS) * (THUMB_H + 18);
         if (idx >= s_cg_n) break;
         lfill_rect(gx, gy, THUMB_W, THUMB_H, 0x1D3557u);
         if (cg_is_seen(idx)) {
@@ -1859,10 +1863,23 @@ static void gallery_hit(int lx, int ly)
 {
     uint16_t pages = (uint16_t)((s_cg_n + CG_PAGE - 1) / CG_PAGE);
     int i;
+    if (ly < 18) {                       /* route tabs */
+        int t = (lx - 2) / 61;
+        uint16_t k;
+        if (t < 0 || t > 6) return;
+        for (k = 0; k < s_cg_n; k++) {
+            if (s_cg_grp[k] == (uint8_t)t) {
+                s_cg_tab = (uint8_t)t;
+                s_cg_page = (uint16_t)(k / CG_PAGE);
+                return;
+            }
+        }
+        return;
+    }
     for (i = 0; i < CG_PAGE; i++) {
         uint16_t idx = (uint16_t)(s_cg_page * CG_PAGE + i);
         int gx = 14 + (i % CG_COLS) * (THUMB_W + 16);
-        int gy = 30 + (i / CG_COLS) * (THUMB_H + 18);
+        int gy = 40 + (i / CG_COLS) * (THUMB_H + 18);
         if (idx >= s_cg_n) break;
         if (lx >= gx && lx < gx + THUMB_W && ly >= gy && ly < gy + THUMB_H) {
             if (cg_is_seen(idx)) {
