@@ -1453,13 +1453,18 @@ static void draw_button(int x, int y, int w, int h, const char *cjk,
 static void draw_menu_item(int x, int y, int w, int h, const char *cjk,
                            const char *ascii, uint8_t active)
 {
+    /* original layout: small icon block, CJK label, tiny English caption */
     uint32_t accent = active ? 0xE8998Du : 0xB0526Du;
     uint32_t text = active ? 0xFFE9E4u : 0xF5F2F0u;
     ldim_rect(x, y, w, h, 150);
-    lfill_rect(x, y, 3, h, accent);
-    if (s_font_w)
-        draw_str(cjk, x + 14, y + (h - s_font_h) / 2, text);
-    else {
+    lfill_rect(x, y, 2, h, accent);
+    /* icon: a small square glyph to the left of the label */
+    lfill_rect(x + 8, y + h / 2 - 5, 9, 9, accent);
+    lrect_outline(x + 8, y + h / 2 - 5, 9, 9, 1, 0xF5F2F0u);
+    if (s_font_w) {
+        draw_str(cjk, x + 22, y + 2, text);
+        draw_ascii8(x + 22, y + h - 9, ascii, 1, 0xC9BEB8u);
+    } else {
         int tw = ascii8_w(ascii, 1);
         draw_ascii8(x + (w - tw) / 2, y + (h - 8) / 2, ascii, 1, text);
     }
@@ -2432,6 +2437,20 @@ void hb_raw_frame(const hb_spoint_t *touch)
     }
     compose_textbox();
     compose_text();
+    /* chapter marker, top-left (original: "CHAPTER 2-1") */
+    {
+        char cb[24];
+        int k = 0;
+        const char *p1 = "CHAPTER ";
+        unsigned n = (unsigned)s_chapter + 1u;
+        while (*p1) cb[k++] = *p1++;
+        if (n >= 100u) cb[k++] = (char)('0' + (n / 100u) % 10u);
+        if (n >= 10u) cb[k++] = (char)('0' + (n / 10u) % 10u);
+        cb[k++] = (char)('0' + n % 10u);
+        cb[k] = 0;
+        ldim_rect(4, 4, 108, 14, 120);
+        draw_ascii8(8, 7, cb, 1, 0xF5F2F0u);
+    }
     /* audio debug (temporary): ret / file-existed / last file */
     {
         char d[52];

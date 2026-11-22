@@ -52,17 +52,22 @@ def title_page():
         v = 20 + int(40 * (i / (H * SCALE)))
         d.line([(0, i), (W * SCALE, i)], fill=(6, v, v + 20))
     font = cjk_font(16 * SCALE // 2 * 2)
-    items = ["开始游戏", "继续游戏", "章节选择", "读档", "CG鉴赏", "流程图", "设置"]
+    tiny = cjk_font(7 * SCALE)
+    items = [("开始游戏", "NEW GAME"), ("继续游戏", "CONTINUE"),
+             ("章节选择", "CHAPTERS"), ("读档", "DATA LOAD"),
+             ("CG鉴赏", "EXTRA MODE"), ("流程图", "FLOWCHART"),
+             ("设置", "SYSTEM CONFIG")]
     X, Wd, Y0, DY, Hh = 14, 118, 38, 27, 26
-    for i, name in enumerate(items):
+    for i, (name, en) in enumerate(items):
         y = Y0 + i * DY
-        band(d, X, y, Wd, Hh, (29, 53, 87), (69, 123, 157), 2)
-        # accent bar on the left
-        d.rectangle([px(X), px(y), px(X + 3), px(y + Hh)], fill=(232, 153, 141))
+        band(d, X, y, Wd, Hh, (29, 53, 87), None)
+        d.rectangle([px(X), px(y), px(X + 2), px(y + Hh)], fill=(232, 153, 141))
+        d.rectangle([px(X + 8), px(y + Hh // 2 - 5), px(X + 17),
+                     px(y + Hh // 2 + 4)], fill=(232, 153, 141))
         bb = d.textbbox((0, 0), name, font=font)
-        tw = bb[2] - bb[0]
-        d.text((px(X + Wd // 2) - tw // 2, px(y + 4)), name, font=font,
-               fill=(241, 250, 238))
+        d.text((px(X + 22), px(y + 1)), name, font=font, fill=(245, 242, 240))
+        d.text((px(X + 22), px(y + Hh - 9)), en, font=tiny,
+               fill=(201, 190, 184))
     d.text((px(6), px(H - 12)), "SENREN*BANKA", font=cjk_font(8 * SCALE),
            fill=(200, 200, 210))
     return img
