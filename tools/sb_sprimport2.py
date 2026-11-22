@@ -16,6 +16,12 @@ W, H = 160, 220
 
 
 def pack_spr(img: Image.Image) -> bytes:
+    # Originals are full-body (953x1632). Squeezing that into 160x220 makes
+    # the face a few pixels -> "no face". Crop to the upper body (the same
+    # framing the original game uses) so the face fills a real area.
+    W0, H0 = img.size
+    if H0 > W0:                       # portrait stand: take top 55 %
+        img = img.crop((0, 0, W0, int(H0 * 0.55)))
     im = img.convert("RGBA")
     # The KrkrExtract PNGs lost the alpha channel — the stand background is
     # solid black. Key near-black out with a soft edge so sprites over
@@ -30,12 +36,13 @@ def pack_spr(img: Image.Image) -> bytes:
                     px[x, y] = (0, 0, 0, 0)
                 elif lum < 44:                  # soft edge
                     px[x, y] = (r, g, b, int(255 * (lum - 20) / 24))
-    # fit inside 160x220 keeping aspect, bottom-aligned (VN style)
-    sc = min(W / im.width, H / im.height)
-    nw, nh = max(1, round(im.width * sc)), max(1, round(im.height * sc))
+    # COVER-fill 160x220: the face must fill real pixels, so scale until both
+    # dimensions are covered and crop the overflow (never letterbox).
+    sc = max(W / im.width, H / im.height)
+    nw, nh = max(W, round(im.width * sc)), max(H, round(im.height * sc))
     im = im.resize((nw, nh), Image.LANCZOS)
     canvas = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    canvas.paste(im, ((W - nw) // 2, H - nh))
+    canvas.paste(im, ((W - nw) // 2, (H - nh) // 2))   # centre both axes
     px = canvas.load()
     col = bytearray(W * H * 2)
     alp = bytearray(W * H)

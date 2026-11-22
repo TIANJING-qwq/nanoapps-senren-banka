@@ -81,6 +81,8 @@ def extract(path: Path):
         elif cls == "character":
             ch = fname.split(".")[0] if "." in fname else fname
             raw.append((pos, ("C", ch, fname)))
+        elif cls == "event":
+            raw.append((pos, ("E", fname)))          # full-screen event CG
 
     # ---- dialogue blocks: line `"<sp>",` + line `void,` + line `"<tx>",` ---
     p = 0

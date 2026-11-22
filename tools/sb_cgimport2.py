@@ -44,12 +44,15 @@ pick = (scn + rest)[:CAP]
 (pack / "cg").mkdir(parents=True, exist_ok=True)
 (pack / "cgt").mkdir(parents=True, exist_ok=True)
 idx = bytearray(b"VNCG" + b"\x00\x00" + struct.pack("<H", len(pick)))
+name_rows = []
 for i, p in enumerate(pick):
     with Image.open(p) as im:
         (pack / f"cg/cg{i:02d}.bin").write_bytes(to_vnbi(im, 432, 240))
         (pack / f"cgt/cg{i:02d}.bin").write_bytes(to_vnbi(im, 84, 48))
     nm = f"cg{i:02d}".encode()
     idx += struct.pack("<H", len(nm)) + nm
+    name_rows.append(f"{p.stem}\tcg{i:02d}")
 (pack / "cg.idx").write_bytes(bytes(idx))
+(pack / "cg_names.tsv").write_text("\n".join(name_rows), encoding="utf-8")
 tot = sum((pack / f"cg/cg{i:02d}.bin").stat().st_size for i in range(len(pick)))
 print(f"{len(pick)} CGs -> {pack} (cg {tot // 1048576} MB)")
