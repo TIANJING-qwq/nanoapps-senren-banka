@@ -222,6 +222,7 @@ static uint16_t s_dbg_calls;             /* how many play calls happened  */
  * it again before the previous clip finished overlaps/crashes (device
  * reboot). Everything goes through this mutex. */
 static uint32_t s_audio_until;           /* s_ticks when the clip ends    */
+static char     s_last_voice[32];        /* dedupe repeated OP_VOICE      */
 static uint16_t s_pending_ticks;         /* length of the queued clip     */
 
 static uint8_t  s_dbg_fs;                /* file existed when attempted   */
@@ -1202,12 +1203,17 @@ static void step(void)
                     s_voice_ticks = ms / VOICE_TICK_MS + 1u;
                 }
                 s_voice_t0 = s_ticks;
-                if (s_voice_ticks && !audio_busy())
+                /* never play the same clip twice in a row: a re-entered step,
+                   a rewind or a duplicated op would otherwise sound like the
+                   same line doubling up */
+                if (str_eq(name, s_last_voice)) break;
+                if (s_voice_ticks && !audio_busy()) {
                     /* queue it: plays at the next frame start, OUTSIDE the
                        touch-event context. Skipped while another clip is
-                       still playing (the API is single-shot; overlapping
-                       calls crash the device). */
+                       still playing (the API is single-shot). */
                     queue_sound(path, 0x7FFFu, 2, (uint16_t)s_voice_ticks);
+                    xmemcpy(s_last_voice, name, xstrlen(name) + 1);
+                }
             }
             break;
         }
@@ -2223,8 +2229,10 @@ void hb_raw_frame(const hb_spoint_t *touch)
             /* Ultra conservative: clip length + 50% + 2 s, and never less
                than 3 s between two playbacks. Frequent pthread_create on a
                single static descriptor is what reboots the device. */
-            hold = hold * 2u + 120u;
-            if (hold < 240u) hold = 240u;    /* ~8 s floor */
+            /* clip length + 2 s (covers the pthread's loadFile latency),
+               floor 4 s. Longer waits only make speech sparse. */
+            hold = hold + 60u;
+            if (hold < 120u) hold = 120u;
             s_audio_until = s_ticks + hold;
         }
         if (s_dbg_calls < 9999) s_dbg_calls++;
