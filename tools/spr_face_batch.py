@@ -25,10 +25,12 @@ MOUTH_DY = 0.62          # mouth top = eye top + 0.62 * eye height
 
 
 def bgra(p):
+    """32bpp BMP is BGRA, bottom-up. Return a proper RGBA array."""
     b = np.fromfile(p, dtype=np.uint8)
     w = int.from_bytes(b[18:22], "little")
     h = int.from_bytes(b[22:26], "little")
-    return b[54:54 + w * 4 * h].reshape(h, w, 4)[::-1].copy()
+    px = b[54:54 + w * 4 * h].reshape(h, w, 4)[::-1]
+    return np.dstack([px[..., 2], px[..., 1], px[..., 0], px[..., 3]]).copy()
 
 
 def isize(p):
@@ -39,7 +41,7 @@ def isize(p):
 
 
 def skin(px):
-    a = px[..., 2::-1].astype(np.int16)
+    a = px[..., :3].astype(np.int16)
     r, g, b = a[..., 0], a[..., 1], a[..., 2]
     return (px[..., 3] > 128) & (r > 150) & (g > 110) & (b > 90) & \
            (r > g + 12) & (g > b + 5) & (r - b > 25)
@@ -140,13 +142,10 @@ def main():
             if soft < 40:
                 continue
             if 90 <= h <= 170 and 140 <= w <= 230 and soft > 2500:
-                eyes.append((soft, p, px))
+                eyes.append((soft, p, px, w))
             elif h <= 70 and w >= 60:
                 mouths.append((soft, p, px))
-        eyes.sort(key=lambda t: -t[0])
-        mouths.sort(key=lambda t: -t[0])
-        part_cache[base] = (eyes[0][2] if eyes else None,
-                            mouths[0][2] if mouths else None)
+        part_cache[base] = (eyes, mouths)
 
     out = PACK / "spr"
     out.mkdir(parents=True, exist_ok=True)
@@ -155,8 +154,15 @@ def main():
         name = order.get(base, f"ch{i:02d}")
         body = bgra(groups[base][1])
         fc = face_centre(body)
-        eye, mouth = part_cache[base]
-        ok = fc is not None and eye is not None and len(np.where(eye[..., 3] > 128)[0]) > 0
+        eye_l, mouth_l = part_cache[base]
+        # choose the eye part whose width best matches 0.62 x face width
+        eye = None
+        if fc and eye_l:
+            fw = box_w = fc[2][1] - fc[2][0]
+            eye_l.sort(key=lambda t: abs(t[0] and abs(t[3] * PART_SCALE - fw * 0.62)))
+            eye = eye_l[0][2]
+        mouth = mouth_l[0][2] if mouth_l else None
+        ok = fc is not None and eye is not None and             len(np.where(eye[..., 3] > 128)[0]) > 0
         if ok:
             cx, cy, box = fc
             comp = body.copy()
