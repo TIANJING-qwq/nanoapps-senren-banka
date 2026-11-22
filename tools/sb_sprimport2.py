@@ -19,9 +19,19 @@ def pack_spr(img: Image.Image) -> bytes:
     # Originals are full-body (953x1632). Squeezing that into 160x220 makes
     # the face a few pixels -> "no face". Crop to the upper body (the same
     # framing the original game uses) so the face fills a real area.
+    # KrkrExtract dropped the alpha channel: the stand sits on a solid black
+    # canvas, so trim to the figure's real bounding box first. Then keep only
+    # the TOP ~32 % of the figure — head + shoulders — which is the framing
+    # the original uses; keeping the whole body shrinks the face to a few
+    # pixels and it reads as "no face".
     W0, H0 = img.size
-    if H0 > W0:                       # portrait stand: take top 55 %
-        img = img.crop((0, 0, W0, int(H0 * 0.55)))
+    key = img.convert("L").point(lambda v: 255 if v > 18 else 0)
+    bb = key.getbbox()
+    if bb and (bb[2] - bb[0]) > 40 and (bb[3] - bb[1]) > 40:
+        img = img.crop(bb)
+    W0, H0 = img.size
+    if H0 > W0:
+        img = img.crop((0, 0, W0, int(H0 * 0.32)))
     im = img.convert("RGBA")
     # The KrkrExtract PNGs lost the alpha channel — the stand background is
     # solid black. Key near-black out with a soft edge so sprites over
