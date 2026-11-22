@@ -63,7 +63,8 @@ def main():
                 im = Image.open(io.BytesIO(z.read(i.filename)))
             except Exception:
                 continue
-            (out / (name + ".bin")).write_bytes(pack0(im, rot))
+            just_cg = rot and name.startswith("ev")   # only event art is portrait
+            (out / (name + ".bin")).write_bytes(pack0(im, just_cg))
             n += 1
         print(f"{src}: {n} -> {out} (fmt 0, cover)")
     maps = dict(l.split("\t") for l in
