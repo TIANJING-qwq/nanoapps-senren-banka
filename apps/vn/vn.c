@@ -58,7 +58,7 @@
 
 /* ------------------------------------------------------------- pack caps --- */
 
-#define SCRIPT_MAX      (384u * 1024u)
+#define SCRIPT_MAX      (160u * 1024u)
 #define FONT_GLYPH_MAX  3400
 #define FONT_W_MAX      24
 #define FONT_H_MAX      24
@@ -67,10 +67,10 @@
 /* asset scratch: largest asset is a 432x240 RGB565 bg/cg (9-byte header +
  * 2 bytes/pixel). MUST be separate from s_font_file: images loaded every
  * frame used to overwrite the glyph bitmaps (the "all CJK garbled" bug). */
-#define ASSET_MAX       (9u + 432u * 240u * 2u)
+#define ASSET_MAX       (9u + 432u * 240u * 2u)  /* largest staged asset = a full-screen bg/cg */
 #define BG_W            SCR_W
 #define BG_H            SCR_H
-#define SPR_SLOTS       2
+#define SPR_SLOTS       1
 #define SPR_W_MAX       160
 #define SPR_H_MAX       220
 #define SPR_PX          ((SPR_W_MAX) * (SPR_H_MAX))
