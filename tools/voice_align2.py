@@ -23,6 +23,9 @@ def norm(s):
     return re.sub("[\u3010\u3011\\[\\]\u300c\u300d\u300e\u300f\\s\u30fb]", "", s or "")
 
 
+BLOCK = {"司机", "先生", "女性", "男性", "路人", "乘客", "店员", "学生", "巫女"}
+
+
 def old_per_char():
     per = collections.defaultdict(list)
     for ln in EV.read_text(encoding="utf-8").splitlines():
@@ -30,7 +33,7 @@ def old_per_char():
         if len(p) < 4 or p[2] != "S":
             continue
         sp = norm(p[3])
-        if not sp:
+        if not sp or sp in BLOCK:
             continue
         per[sp].append(p[5] if len(p) > 5 else "")
     return per
