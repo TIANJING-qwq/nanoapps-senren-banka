@@ -37,6 +37,17 @@ jobs:
         run: |
           chmod +x start
           ./start build vn
+      - name: Compiler diagnostics (on failure)
+        if: failure()
+        run: |
+          for f in apps/vn/build/build.log build/build.log; do
+            if [ -f "$f" ]; then
+              echo "=== $f ==="
+              grep -n -i -B2 -A8 "error" "$f" | tail -120 || true
+              echo "=== tail ==="
+              tail -40 "$f" || true
+            fi
+          done
       - name: Package .nanoapp folder
         run: |
           python tools/build_apps.py vn
