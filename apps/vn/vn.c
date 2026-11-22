@@ -2231,8 +2231,8 @@ void hb_raw_frame(const hb_spoint_t *touch)
                single static descriptor is what reboots the device. */
             /* clip length + 2 s (covers the pthread's loadFile latency),
                floor 4 s. Longer waits only make speech sparse. */
-            hold = hold + 60u;
-            if (hold < 120u) hold = 120u;
+            hold = hold + 90u;
+            if (hold < 180u) hold = 180u;    /* clip + 3 s, floor 6 s */
             s_audio_until = s_ticks + hold;
         }
         if (s_dbg_calls < 9999) s_dbg_calls++;
