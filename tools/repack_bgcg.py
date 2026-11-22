@@ -46,8 +46,10 @@ def key_green(im):
 
 
 def pack0(im, rotate=False):
-    im = key_green(im)
+    """Event CG art is portrait on a green backdrop; backgrounds are native
+    16:9 landscape and must be left alone."""
     if rotate:
+        im = key_green(im)
         im = im.rotate(-90, expand=True)
     im = cover(im)
     px = im.load()
@@ -66,7 +68,7 @@ def pack0(im, rotate=False):
 def main():
     z = zipfile.ZipFile(ZIP)
     for src, dst in (("bcgi", "bg"), ("evig", "cg")):
-        rot = True                    # bcgi and evig are both portrait
+        rot = (dst == "cg")           # only evig art is portrait
         n = 0
         out = OUT / dst
         out.mkdir(parents=True, exist_ok=True)
@@ -78,7 +80,7 @@ def main():
                 im = Image.open(io.BytesIO(z.read(i.filename)))
             except Exception:
                 continue
-            just_cg = rot and not name.startswith("sd")
+            just_cg = rot and name.startswith("ev")
             (out / (name + ".bin")).write_bytes(pack0(im, just_cg))
             n += 1
         print(f"{src}: {n} -> {out} (fmt 0, cover)")
