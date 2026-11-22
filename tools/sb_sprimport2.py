@@ -15,44 +15,39 @@ from PIL import Image
 W, H = 160, 220
 
 
-def pack_spr(img: Image.Image) -> bytes:
-    # Originals are full-body (953x1632). Squeezing that into 160x220 makes
-    # the face a few pixels -> "no face". Crop to the upper body (the same
-    # framing the original game uses) so the face fills a real area.
-    # KrkrExtract dropped the alpha channel: the stand sits on a solid black
-    # canvas, so trim to the figure's real bounding box first. Then keep only
-    # the TOP ~32 % of the figure — head + shoulders — which is the framing
-    # the original uses; keeping the whole body shrinks the face to a few
-    # pixels and it reads as "no face".
-    W0, H0 = img.size
-    key = img.convert("L").point(lambda v: 255 if v > 18 else 0)
-    bb = key.getbbox()
-    if bb and (bb[2] - bb[0]) > 40 and (bb[3] - bb[1]) > 40:
-        img = img.crop(bb)
-    W0, H0 = img.size
-    if H0 > W0:
-        img = img.crop((0, 0, W0, int(H0 * 0.32)))
-    im = img.convert("RGBA")
-    # The KrkrExtract PNGs lost the alpha channel — the stand background is
-    # solid black. Key near-black out with a soft edge so sprites over
-    # backgrounds don't show the black box.
-    if im.getextrema()[3][0] == 255:            # fully opaque -> key black
-        px = im.load()
-        for y in range(im.height):
-            for x in range(im.width):
-                r, g, b, _ = px[x, y]
-                lum = max(r, g, b)
-                if lum < 20:
-                    px[x, y] = (0, 0, 0, 0)
-                elif lum < 44:                  # soft edge
-                    px[x, y] = (r, g, b, int(255 * (lum - 20) / 24))
-    # COVER-fill 160x220: the face must fill real pixels, so scale until both
-    # dimensions are covered and crop the overflow (never letterbox).
-    sc = max(W / im.width, H / im.height)
-    nw, nh = max(W, round(im.width * sc)), max(H, round(im.height * sc))
+def bmp_rgba(path):
+    """The .tlg files are 32bpp BMPs; PIL drops the 4th byte, so read BGRA
+    straight from the file. Returns an RGBA PIL image with real alpha."""
+    import numpy as np
+    b = np.fromfile(path, dtype=np.uint8)
+    w = int.from_bytes(b[18:22], "little")
+    h = int.from_bytes(b[22:26], "little")
+    px = b[54:54 + w * 4 * h].reshape(h, w, 4)[::-1]      # bottom-up -> top-down
+    rgb_arr = px[..., 2::-1]
+    return Image.fromarray(
+        __import__("numpy").dstack([rgb_arr, px[..., 3]]).astype("uint8"), "RGBA")
+
+
+def pack_spr(path):
+    """Full-body thumbnail: the layered stands carry NO facial features (the
+    eyes/mouth live in separate part files whose placement comes from an
+    E-mote table we have not mapped yet), so framing a bust would show a
+    faceless head. Shrink the whole figure instead and sit it on the floor of
+    the slot."""
+    im = bmp_rgba(path)
+    alpha = im.split()[3]
+    bb = alpha.getbbox()
+    if bb:
+        im = im.crop(bb)
+    if im.width < 8 or im.height < 8:
+        return (bytes(bytearray(b"VNBI") + struct.pack("<HHB", W, H, 1))
+                + bytes(W * H * 2) + bytes(W * H))
+    # contain-fit (never crop), anchor to the bottom
+    sc = min(W / im.width, H / im.height)
+    nw, nh = max(1, round(im.width * sc)), max(1, round(im.height * sc))
     im = im.resize((nw, nh), Image.LANCZOS)
     canvas = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    canvas.paste(im, ((W - nw) // 2, (H - nh) // 2))   # centre both axes
+    canvas.paste(im, ((W - nw) // 2, H - nh))
     px = canvas.load()
     col = bytearray(W * H * 2)
     alp = bytearray(W * H)
@@ -76,17 +71,17 @@ out.mkdir(parents=True, exist_ok=True)
 
 # group by base name like "芳乃a" (strip _<digits> suffixes)
 groups = {}
-for p in src.glob("*.png"):
+for p in src.glob("*.tlg"):
     stem = p.stem
-    if stem.endswith(".tlg"):
-        stem = stem[:-4]
     m = re.match(r"^([^_]+?)(?:_\d+)?$", stem)
     if not m:
         continue
     base = m.group(1)
     try:
-        im = Image.open(p)
-        w, h = im.size
+        with open(p, "rb") as fh:
+            hdr = fh.read(26)
+        w = int.from_bytes(hdr[18:22], "little")
+        h = int.from_bytes(hdr[22:26], "little")
     except Exception:
         continue
     if w < 300 or h < 600:          # full stands only, skip face diffs
@@ -98,8 +93,7 @@ for p in src.glob("*.png"):
 rows = []
 for i, (base, (area, p)) in enumerate(sorted(groups.items())):
     name = f"ch{i:02d}"
-    with Image.open(p) as im:
-        (out / (name + ".bin")).write_bytes(pack_spr(im))
+    (out / (name + ".bin")).write_bytes(pack_spr(p))
     rows.append(f"{base}\t{name}")
 (pack / "spr_names.tsv").write_text("\n".join(rows), encoding="utf-8")
 print(f"{len(rows)} characters -> {out}")
