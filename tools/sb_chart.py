@@ -129,6 +129,20 @@ def build():
             return c
         return it.get("comment") or it["id"]
 
+    # The Mi Band script has 112 chapter files; the chart's own chapter list is
+    # shorter, so map each chart chapter's rank onto the new file range.
+    N_FILES = 112
+    chap_ids = [it["id"] for it in items
+                if it.get("type") == "chapter"]
+    CHAP_RANK = {cid: i for i, cid in enumerate(chap_ids)}
+
+    def script_chapter(it):
+        r = CHAP_RANK.get(it["id"])
+        if r is None:
+            return 0
+        n = max(1, len(chap_ids) - 1)
+        return round(r * (N_FILES - 1) / n)
+
     ids = [it["id"] for it in items]
     order = {k: i for i, k in enumerate(ids)}
 
@@ -184,7 +198,8 @@ def build():
             base_idx[it["id"]] = len(nodes)
             nodes.append({
                 "x": 4 + col * COL_DX, "y": 4 + depth * ROW_DY,
-                "type": t, "route": g, "chapter": chapter_of(it),
+                "type": t, "route": g,
+                "chapter": script_chapter(it) if t == 0 else script_chapter(it),
                 "title": title_of(it),
             })
         edge_base = len(edges)

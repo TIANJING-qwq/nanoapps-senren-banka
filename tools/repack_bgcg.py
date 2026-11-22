@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
-"""Repack bg + cg from the Mi Band pack as fmt 0 (RGB565 only).
-
-The engine validates bg/cg against a header-only RGB565 layout; files with an
-alpha plane (fmt 1) are silently rejected and the screen keeps the old image.
-Sprites keep fmt 1 because they need alpha.
-"""
+"""Repack bg + cg from the Mi Band pack as fmt 0 with aspect-preserving
+cover-fit (the old code stretched them to 432x240, distorting the art)."""
 import io
 import struct
 import sys
@@ -19,10 +15,27 @@ OUT = Path("NanoApps/build/sb_full")
 W, H = 432, 240
 
 
-def pack0(im):
+def cover(im):
+    """Landscape art: cover-fill. Portrait/odd art: fit inside and letterbox,
+    otherwise it degenerates into a thin vertical strip."""
     im = im.convert("RGB")
-    if im.size != (W, H):
-        im = im.resize((W, H), Image.LANCZOS)
+    ar = im.width / im.height
+    if ar < 1.15 or ar > 2.6:                  # not a normal CG aspect
+        sc = min(W / im.width, H / im.height)
+        nw, nh = max(1, round(im.width * sc)), max(1, round(im.height * sc))
+        out = Image.new("RGB", (W, H), (0, 0, 0))
+        out.paste(im.resize((nw, nh), Image.LANCZOS),
+                  ((W - nw) // 2, (H - nh) // 2))
+        return out
+    sc = max(W / im.width, H / im.height)
+    nw, nh = max(W, round(im.width * sc)), max(H, round(im.height * sc))
+    im = im.resize((nw, nh), Image.LANCZOS)
+    return im.crop(((nw - W) // 2, (nh - H) // 2,
+                    (nw - W) // 2 + W, (nh - H) // 2 + H))
+
+
+def pack0(im):
+    im = cover(im)
     px = im.load()
     col = bytearray(W * H * 2)
     i = 0
@@ -52,8 +65,7 @@ def main():
                 continue
             (out / (name + ".bin")).write_bytes(pack0(im))
             n += 1
-        print(f"{src}: {n} -> {out} (fmt 0)")
-    # refresh the ASCII background aliases from the new files
+        print(f"{src}: {n} -> {out} (fmt 0, cover)")
     maps = dict(l.split("\t") for l in
                 Path("NanoApps/build/bg_ascii.tsv").read_text(encoding="utf-8").splitlines()
                 if "\t" in l)

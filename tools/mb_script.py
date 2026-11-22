@@ -13,6 +13,7 @@ Choices are emitted with both option texts and fall through to the next line
 for now (v1); proper branch targets come later.
 """
 import json
+import re
 import struct
 import sys
 import zipfile
@@ -105,9 +106,11 @@ def build(lines):
 
 def main():
     z = zipfile.ZipFile(ZIP)
+    def _num(i):
+        m = re.search(r"(\d+)\.txt$", i.filename)
+        return int(m.group(1)) if m else 0
     files = sorted((i for i in z.infolist()
-                    if "/script/" in i.filename and i.file_size),
-                   key=lambda i: i.filename)
+                    if "/script/" in i.filename and i.file_size), key=_num)
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "ch").mkdir(exist_ok=True)
     total_say = total_bg = total_cg = total_spr = 0
